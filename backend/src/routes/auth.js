@@ -1,4 +1,4 @@
-// routes/auth.js - UPDATED WITH IMPROVED RECAPTCHA VERIFICATION
+// routes/auth.js - UPDATED WITH IMPROVED RECAPTCHA VERIFICATION (THEME REMOVED)
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -163,6 +163,48 @@ router.put('/notification-preferences', auth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to update notification preferences'
+    });
+  }
+});
+
+// ========================
+// ✅ PROFILE UPDATE ENDPOINT
+// ========================
+
+router.put('/profile', auth, async (req, res) => {
+  try {
+    const { name, email, profilePicture } = req.body;
+    
+    console.log('👤 Updating profile for user:', req.user.id);
+
+    const updateData = {};
+    if (name) updateData.name = name;
+    if (email) updateData.email = email;
+    if (profilePicture) updateData.profilePicture = profilePicture;
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      updateData,
+      { new: true }
+    ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: user
+    });
+  } catch (error) {
+    console.error('❌ Profile update error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update profile'
     });
   }
 });
@@ -424,7 +466,7 @@ router.post("/register", async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Create user with role fields initialized
+    // Create user with role fields initialized (THEME PREFERENCES REMOVED)
     const user = new User({
       name,
       email,
@@ -435,6 +477,7 @@ router.post("/register", async (req, res) => {
       verificationExpires: otpExpires,
       role: null,
       hasSelectedRole: false
+      // THEME PREFERENCES COMPLETELY REMOVED
     });
 
     await user.save();
@@ -634,7 +677,7 @@ router.post("/login", checkRegisteredEmail, async (req, res) => {
 });
 
 // ========================
-// ✅ IMPROVED GET CURRENT USER WITH ROLE INFO
+// ✅ IMPROVED GET CURRENT USER WITH ROLE INFO (THEME REMOVED)
 // ========================
 
 router.get("/me", auth, async (req, res) => {
@@ -659,6 +702,7 @@ router.get("/me", auth, async (req, res) => {
       isVerified: user.isVerified,
       role: userRole,
       hasSelectedRole: user.hasSelectedRole,
+      // THEME PREFERENCES COMPLETELY REMOVED
       createdClasses: user.createdClasses,
       joinedClasses: user.joinedClasses,
       createdAt: user.createdAt

@@ -1490,30 +1490,8 @@ body, html {
   max-width: 62.5rem;
 }
 
-/* Class Banner Section */
-.class-banner-section {
-  position: relative;
-  margin-bottom: 2rem;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
-}
 
-.class-banner {
-  height: 200px;
-  background-size: cover;
-  background-position: center;
-  position: relative;
-}
 
-.banner-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(135deg, rgba(0,0,0,0.3) 0%, transparent 100%);
-}
 
 .class-title-section {
   position: absolute;
@@ -1753,24 +1731,7 @@ body, html {
   background: #1669d6;
 }
 
-.repost-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: none;
-  border: 1px solid #dadce0;
-  border-radius: 4px;
-  padding: 0.75rem 1rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #3c4043;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
 
-.repost-btn:hover {
-  background: var(--boq-chrometransition-background);
-}
 
 .btn-icon {
   display: flex;
@@ -1865,9 +1826,7 @@ body, html {
     width: calc(100% - 2rem);
   }
   
-  .class-banner {
-    height: 150px;
-  }
+ 
   
   .class-main-title {
     font-size: 1.5rem;
@@ -4709,25 +4668,7 @@ a:focus {
   border-bottom: 1px solid #e0e0e0;
 }
 
-.new-announcement-btn,
-.repost-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border: 1px solid #dadce0;
-  border-radius: 4px;
-  background: white;
-  color: #3c4043;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
-}
 
-.new-announcement-btn:hover,
-.repost-btn:hover {
-  background: #f8f9fa;
-}
 
 .btn-icon {
   display: flex;
@@ -4902,7 +4843,7 @@ a:focus {
   padding: 20px;
   transition: box-shadow 0.2s;
   width: 1000px;
-  height: auto;
+  height: 80px;
 }
 
 .classwork-card:hover {

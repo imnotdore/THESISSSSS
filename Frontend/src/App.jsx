@@ -1,4 +1,4 @@
-// src/App.jsx - FIXED ROUTES (COMPLETE VERSION)
+// src/App.jsx - UPDATED WITH NOTIFICATION ROUTES REMOVED
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Register from "./pages/Register";
 import Login from "./pages/Login";
@@ -12,115 +12,106 @@ import AuthSuccess from "./pages/AuthSuccess";
 import QuizFormPage from "./pages/QuizFormPage";
 import StudentQuizPage from "./pages/StudentQuizPage";
 import TeacherExamSession from "./pages/TeacherExamSession";
-import StudentExamSession from "./pages/StudentExamSession"; // ✅ ADD THIS IMPORT
-import NotificationSettings from './pages/NotificationSettings';
-import NotificationsPage from './pages/NotificationsPage';
+import StudentExamSession from "./pages/StudentExamSession";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
   return (
     <Router>
-      <Routes>
-        {/* ✅ DEFAULT ROUTE REDIRECTS TO LOGIN */}
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        
-        {/* Public routes */}
-        <Route path="/register" element={<Register />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/auth/success" element={<AuthSuccess />} />
+      <div className="app-container">
+        <Routes>
+          {/* ✅ DEFAULT ROUTE REDIRECTS TO LOGIN */}
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          
+          {/* Public routes */}
+          <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/auth/success" element={<AuthSuccess />} />
 
-        {/* ✅ SINGLE DASHBOARD FOR ALL USERS */}
-        <Route path="/dashboard" element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        } />
+          {/* ✅ PROTECTED ROUTES */}
+          <Route path="/dashboard" element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          } />
 
-        {/* ✅ TO DO PAGE - STUDENTS ONLY */}
-        <Route path="/todo" element={
-          <ProtectedRoute requiredRole="student">
-            <ToDoPage />
-          </ProtectedRoute>
-        } />
+          {/* Class and Quiz Routes */}
+          <Route path="/class/:classId" element={
+            <ProtectedRoute>
+              <ClassDetails />
+            </ProtectedRoute>
+          } />
 
-        {/* ✅ REVIEW PAGE - TEACHERS ONLY */}
-        <Route path="/review" element={
-          <ProtectedRoute requiredRole="teacher">
-            <ReviewPage />
-          </ProtectedRoute>
-        } />
+          {/* ✅ ADDED: QUIZ CREATION ROUTES - FIX FOR DEPLOYMENT ISSUE */}
+          <Route path="/class/:classId/quiz/new" element={
+            <ProtectedRoute requiredRole="teacher">
+              <QuizFormPage />
+            </ProtectedRoute>
+          } />
 
-        {/* Class details */}
-        <Route path="/class/:id" element={
-          <ProtectedRoute>
-            <ClassDetails />
-          </ProtectedRoute>
-        } />
+          <Route path="/class/:classId/quiz/:examId/edit" element={
+            <ProtectedRoute requiredRole="teacher">
+              <QuizFormPage />
+            </ProtectedRoute>
+          } />
 
-        {/* Quiz Creation Routes */}
-        <Route path="/class/:classId/quiz/new" element={
-          <ProtectedRoute requiredRole="teacher">
-            <QuizFormPage />
-          </ProtectedRoute>
-        } />
+          {/* Legacy routes for backward compatibility */}
+          <Route path="/quiz-form" element={
+            <ProtectedRoute requiredRole="teacher">
+              <QuizFormPage />
+            </ProtectedRoute>
+          } />
 
-        <Route path="/class/:classId/quiz/:examId/edit" element={
-          <ProtectedRoute requiredRole="teacher">
-            <QuizFormPage />
-          </ProtectedRoute>
-        } />
+          {/* Exam and Quiz Session Routes */}
+          <Route path="/student-quiz/:examId" element={
+            <ProtectedRoute requiredRole="student">
+              <StudentQuizPage />
+            </ProtectedRoute>
+          } />
 
-        {/* Exam Room */}
-        <Route path="/room/:roomId" element={
-          <ProtectedRoute>
-            <ExamRoomWrapper />
-          </ProtectedRoute>
-        } />
+          <Route path="/teacher-exam/:examId" element={
+            <ProtectedRoute requiredRole="teacher">
+              <TeacherExamSession />
+            </ProtectedRoute>
+          } />
 
-        {/* ✅ STUDENT QUIZ ACCESS ROUTE - FIXED */}
-        <Route path="/exam/form/:examId" element={
-          <ProtectedRoute>
-            <ExamFormView />
-          </ProtectedRoute>
-        } />
+          <Route path="/student-exam/:examId" element={
+            <ProtectedRoute requiredRole="student">
+              <StudentExamSession />
+            </ProtectedRoute>
+          } />
 
-        {/* ✅ SINGLE STUDENT QUIZ ROUTE - NO DUPLICATES */}
-        <Route path="/student-quiz/:examId" element={
-          <ProtectedRoute>
-            <StudentQuizPage />
-          </ProtectedRoute>
-        } />
+          <Route path="/exam-room/:examId" element={
+            <ProtectedRoute>
+              <ExamRoomWrapper />
+            </ProtectedRoute>
+          } />
 
-        {/* ✅ TEACHER EXAM SESSION ROUTE - NOW IMPORTED */}
-        <Route path="/teacher-exam/:examId" element={
-          <ProtectedRoute requiredRole="teacher">
-            <TeacherExamSession />
-          </ProtectedRoute>
-        } />
+          <Route path="/exam-form/:examId?" element={
+            <ProtectedRoute requiredRole="teacher">
+              <ExamFormView />
+            </ProtectedRoute>
+          } />
 
-        {/* ✅ STUDENT EXAM SESSION ROUTE - ADD THIS! 🚀 */}
-        <Route path="/student-exam/:examId" element={
-          <ProtectedRoute requiredRole="student">
-            <StudentExamSession />
-          </ProtectedRoute>
-        } />
+          {/* Other Protected Routes */}
+          <Route path="/todo" element={
+            <ProtectedRoute requiredRole="student">
+              <ToDoPage />
+            </ProtectedRoute>
+          } />
 
-        {/* ✅ NOTIFICATION ROUTES - ADDED */}
-        <Route path="/notification-settings" element={
-          <ProtectedRoute>
-            <NotificationSettings />
-          </ProtectedRoute>
-        } />
+          <Route path="/review" element={
+            <ProtectedRoute requiredRole="teacher">
+              <ReviewPage />
+            </ProtectedRoute>
+          } />
 
-        <Route path="/notifications" element={
-          <ProtectedRoute>
-            <NotificationsPage />
-          </ProtectedRoute>
-        } />
+          {/* ✅ NOTIFICATION ROUTES REMOVED */}
 
-        {/* ✅ CATCH ALL ROUTE - REDIRECT TO DASHBOARD */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
+          {/* Catch all route - redirect to dashboard */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </div>
     </Router>
   );
 }

@@ -1,4 +1,4 @@
-// server.js - COMPLETELY FIXED VERSION
+// server.js - COMPLETELY FIXED VERSION WITH CHAT FORUM (THEME REMOVED)
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -8,6 +8,7 @@ const dotenv = require("dotenv");
 const cookieParser = require("cookie-parser");
 const path = require("path");
 const jwt = require("jsonwebtoken");
+const ChatMessage = require("./models/ChatMessage"); // ✅ ADD CHAT MESSAGE MODEL
 
 // ✅ LOAD ENV FIRST
 dotenv.config();
@@ -60,9 +61,38 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api/class", require("./routes/classes"));
 app.use("/api/exams", require("./routes/examRoutes"));
 app.use("/api/classwork", require("./routes/classwork"));
-// ANNOUNCEMENTS ROUTE REMOVED
+app.use("/api/announcements", require("./routes/announcements"));
 app.use("/api/student-management", require("./routes/studentManagement"));
 app.use("/api/notifications", require("./routes/notifications"));
+app.use("/api/chat", require("./routes/chatRoutes")); // ✅ ADD CHAT ROUTES
+// THEME ROUTES COMPLETELY REMOVED
+
+// ✅ ADD DEBUG ROUTE TO TEST ALL REGISTERED ROUTES
+app.get("/api/debug-routes", (req, res) => {
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      // Regular route
+      routes.push({
+        path: middleware.route.path,
+        methods: Object.keys(middleware.route.methods),
+        type: 'route'
+      });
+    } else if (middleware.name === 'router') {
+      // Router middleware
+      routes.push({
+        path: middleware.regexp.toString(),
+        type: 'router',
+        mounted: true
+      });
+    }
+  });
+  res.json({ 
+    success: true,
+    message: 'All registered routes',
+    routes: routes
+  });
+});
 
 // ===== HEALTH CHECK =====
 app.get("/api/health", (req, res) => {
@@ -70,6 +100,8 @@ app.get("/api/health", (req, res) => {
     status: "OK", 
     message: "Server is running",
     socketIO: "ENABLED",
+    chat: "ENABLED",
+    // THEME STATUS REMOVED
     timestamp: new Date().toISOString()
   });
 });
@@ -87,7 +119,8 @@ io.use((socket, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     socket.userId = decoded.id;
     socket.userName = decoded.name;
-    console.log('✅ Socket authenticated:', socket.userName);
+    socket.userRole = decoded.role || 'student';
+    console.log('✅ Socket authenticated:', socket.userName, 'Role:', socket.userRole);
     next();
     
   } catch (err) {
@@ -101,9 +134,187 @@ const examRooms = new Map();
 const pendingCameraRequests = new Set();
 
 io.on("connection", (socket) => {
-  console.log("✅ Socket connected:", socket.id, "User:", socket.userName);
+  console.log("✅ Socket connected:", socket.id, "User:", socket.userName, "Role:", socket.userRole);
 
   let currentRoom = null;
+
+  // ===== CLASS CHAT HANDLERS =====
+  socket.on("join-class-chat", async ({ classId }) => {
+    try {
+      socket.join(`class-chat-${classId}`);
+      console.log(`💬 User ${socket.userName} joined class chat: ${classId}`);
+      
+      // Send chat history to the user
+      const messages = await ChatMessage.find({ 
+        classId, 
+        isDeleted: false 
+      })
+      .populate("userId", "name email")
+      .sort({ createdAt: 1 })
+      .limit(50)
+      .lean();
+
+      const formattedMessages = messages.map(msg => ({
+        _id: msg._id,
+        classId: msg.classId,
+        userId: {
+          _id: msg.userId._id,
+          name: msg.userId.name,
+          email: msg.userId.email
+        },
+        userName: msg.userName || msg.userId.name,
+        userRole: msg.userRole,
+        message: msg.message,
+        replies: msg.replies || [],
+        createdAt: msg.createdAt,
+        updatedAt: msg.updatedAt
+      }));
+
+      socket.emit("chat-history", formattedMessages);
+      
+    } catch (error) {
+      console.error('❌ Error joining class chat:', error);
+    }
+  });
+
+  socket.on("send-chat-message", async (data) => {
+    try {
+      const { classId, message } = data;
+      
+      if (!message || !message.trim()) {
+        socket.emit("chat-error", { message: "Message cannot be empty" });
+        return;
+      }
+
+      console.log('💬 New chat message from:', socket.userName, 'Content:', message);
+
+      // Save message to database
+      const newMessage = new ChatMessage({
+        classId,
+        userId: socket.userId,
+        userName: socket.userName,
+        userRole: socket.userRole,
+        message: message.trim()
+      });
+
+      await newMessage.save();
+      await newMessage.populate("userId", "name email");
+
+      // Create message object for real-time broadcast
+      const messageData = {
+        _id: newMessage._id,
+        classId: newMessage.classId,
+        userId: {
+          _id: newMessage.userId._id,
+          name: newMessage.userId.name,
+          email: newMessage.userId.email
+        },
+        userName: newMessage.userName,
+        userRole: newMessage.userRole,
+        message: newMessage.message,
+        replies: newMessage.replies || [],
+        createdAt: newMessage.createdAt,
+        updatedAt: newMessage.updatedAt
+      };
+
+      // Broadcast to all users in the class chat room (including sender)
+      io.to(`class-chat-${classId}`).emit("new-chat-message", messageData);
+      
+      console.log(`💬 Message broadcast to class ${classId}`);
+
+    } catch (error) {
+      console.error('❌ Error sending chat message:', error);
+      socket.emit("chat-error", { message: "Failed to send message" });
+    }
+  });
+
+  socket.on("delete-chat-message", async (data) => {
+    try {
+      const { messageId, classId } = data;
+      
+      // Find and soft delete the message
+      const message = await ChatMessage.findById(messageId);
+      if (message) {
+        // Check if user has permission to delete (owner or teacher)
+        if (message.userId.toString() === socket.userId || socket.userRole === 'teacher') {
+          message.isDeleted = true;
+          message.deletedAt = new Date();
+          await message.save();
+
+          // Broadcast deletion to all users in the class chat room
+          io.to(`class-chat-${classId}`).emit("message-deleted", { messageId });
+          
+          console.log(`🗑️ Message ${messageId} deleted by ${socket.userName}`);
+        } else {
+          socket.emit("chat-error", { message: "Not authorized to delete this message" });
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error deleting chat message:', error);
+      socket.emit("chat-error", { message: "Failed to delete message" });
+    }
+  });
+
+  socket.on("add-chat-reply", async (data) => {
+    try {
+      const { messageId, classId, replyMessage } = data;
+      
+      if (!replyMessage || !replyMessage.trim()) {
+        socket.emit("chat-error", { message: "Reply cannot be empty" });
+        return;
+      }
+
+      const parentMessage = await ChatMessage.findById(messageId);
+      
+      if (!parentMessage) {
+        socket.emit("chat-error", { message: "Message not found" });
+        return;
+      }
+
+      const replyData = {
+        userId: socket.userId,
+        userName: socket.userName,
+        userRole: socket.userRole,
+        message: replyMessage.trim(),
+        createdAt: new Date()
+      };
+
+      parentMessage.replies.push(replyData);
+      await parentMessage.save();
+
+      // Broadcast new reply to all users in the class chat room
+      io.to(`class-chat-${classId}`).emit("reply-added", {
+        messageId,
+        reply: replyData
+      });
+
+      console.log(`💬 Reply added to message ${messageId} by ${socket.userName}`);
+    } catch (error) {
+      console.error('❌ Error adding chat reply:', error);
+      socket.emit("chat-error", { message: "Failed to add reply" });
+    }
+  });
+
+  // Handle typing indicators
+  socket.on("typing-start", (data) => {
+    socket.to(`class-chat-${data.classId}`).emit("user-typing", {
+      userName: socket.userName,
+      isTyping: true
+    });
+  });
+
+  socket.on("typing-stop", (data) => {
+    socket.to(`class-chat-${data.classId}`).emit("user-typing", {
+      userName: socket.userName,
+      isTyping: false
+    });
+  });
+
+  // Leave class chat
+  socket.on("leave-class-chat", ({ classId }) => {
+    socket.leave(`class-chat-${classId}`);
+    console.log(`💬 User ${socket.userName} left class chat: ${classId}`);
+  });
 
   // ===== TIMER SYNC HANDLERS =====
   socket.on('student-time-request', (data) => {
@@ -122,56 +333,67 @@ io.on("connection", (socket) => {
     }
   });
 
-
-// ===== EXAM START/END HANDLERS =====
-// In server.js socket.io handlers
-socket.on('exam-started', (data) => {
-  console.log('📢 Teacher started exam, broadcasting to room:', data.roomId);
-  // Broadcast to all students in the room
-  socket.to(data.roomId).emit('exam-started', data);
-  
-  // Also log who's in the room
-  const room = examRooms.get(data.roomId);
-  if (room) {
-    console.log(`👥 Room ${data.roomId} has ${room.students.size} students`);
-  }
-});
-
-socket.on('exam-ended', (data) => {
-  console.log('🛑 Teacher ended exam, broadcasting to room:', data.roomId);
-  // Broadcast to all students in the room
-  socket.to(data.roomId).emit('exam-ended', data);
-  
-  // Disconnect all students in the room
-  if (examRooms.has(data.roomId)) {
+  // ===== EXAM START/END HANDLERS =====
+  socket.on('exam-started', (data) => {
+    console.log('📢 Teacher started exam, broadcasting to room:', data.roomId);
+    // Broadcast to all students in the room
+    socket.to(data.roomId).emit('exam-started', data);
+    
+    // Also log who's in the room
     const room = examRooms.get(data.roomId);
-    room.students.forEach((studentInfo, studentSocketId) => {
-      socket.to(studentSocketId).emit('teacher-disconnect', {
-        reason: data.message || 'Exam ended by teacher',
-        examId: data.examId
-      });
-    });
-    // Clear the room
-    room.students.clear();
-  }
-});
-
-// Handle teacher manually disconnecting students
-socket.on('disconnect-student', (data) => {
-  console.log(`🔌 Teacher disconnecting student: ${data.studentSocketId} - Reason: ${data.reason}`);
-  
-  // Send disconnect command to student
-  socket.to(data.studentSocketId).emit('teacher-disconnect', {
-    reason: data.reason,
-    examId: data.examId
+    if (room) {
+      console.log(`👥 Room ${data.roomId} has ${room.students.size} students`);
+    }
   });
-  
-  // Remove student from room
-  const room = examRooms.get(`exam-${data.examId}`);
-  if (room && room.students.has(data.studentSocketId)) {
-    room.students.delete(data.studentSocketId);
-  }
-});
+
+  // ✅ ADDED: Exam deployed event handler
+  socket.on('exam-deployed', (data) => {
+    console.log('📢 Teacher deployed exam, broadcasting to room:', data.roomId);
+    // Broadcast to all students in the room
+    socket.to(data.roomId).emit('exam-deployed', data);
+    
+    // Also log who's in the room
+    const room = examRooms.get(data.roomId);
+    if (room) {
+      console.log(`👥 Room ${data.roomId} has ${room.students.size} students`);
+    }
+  });
+
+  socket.on('exam-ended', (data) => {
+    console.log('🛑 Teacher ended exam, broadcasting to room:', data.roomId);
+    // Broadcast to all students in the room
+    socket.to(data.roomId).emit('exam-ended', data);
+    
+    // Disconnect all students in the room
+    if (examRooms.has(data.roomId)) {
+      const room = examRooms.get(data.roomId);
+      room.students.forEach((studentInfo, studentSocketId) => {
+        socket.to(studentSocketId).emit('teacher-disconnect', {
+          reason: data.message || 'Exam ended by teacher',
+          examId: data.examId
+        });
+      });
+      // Clear the room
+      room.students.clear();
+    }
+  });
+
+  // Handle teacher manually disconnecting students
+  socket.on('disconnect-student', (data) => {
+    console.log(`🔌 Teacher disconnecting student: ${data.studentSocketId} - Reason: ${data.reason}`);
+    
+    // Send disconnect command to student
+    socket.to(data.studentSocketId).emit('teacher-disconnect', {
+      reason: data.reason,
+      examId: data.examId
+    });
+    
+    // Remove student from room
+    const room = examRooms.get(`exam-${data.examId}`);
+    if (room && room.students.has(data.studentSocketId)) {
+      room.students.delete(data.studentSocketId);
+    }
+  });
 
   // Teacher sending time to specific student
   socket.on('send-current-time', (data) => {
@@ -201,23 +423,6 @@ socket.on('disconnect-student', (data) => {
     
     console.log(`Settings updated for student ${data.studentSocketId}:`, data.settings);
   });
-// ✅ HANDLE TEACHER MANUAL DISCONNECT
-socket.on('disconnect-student', (data) => {
-  console.log(`🔌 Teacher disconnecting student: ${data.studentSocketId} - Reason: ${data.reason}`);
-  
-  // Send disconnect command to student
-  socket.to(data.studentSocketId).emit('teacher-disconnect', {
-    reason: data.reason,
-    examId: data.examId
-  });
-  
-  // Remove student from room
-  const room = examRooms.get(`exam-${data.examId}`);
-  if (room && room.students.has(data.studentSocketId)) {
-    room.students.delete(data.studentSocketId);
-  }
-});
-
 
   // Join exam room
   socket.on("join-exam-room", ({ roomId, userName, userId, userRole }) => {
@@ -368,39 +573,6 @@ socket.on('disconnect-student', (data) => {
     }
   });
 
-  // ===== CHAT MESSAGE HANDLING =====
-  socket.on("send-chat-message", (data) => {
-    console.log('💬 Chat message received from:', socket.userName);
-    console.log('📨 Message data:', {
-      roomId: data.roomId,
-      message: data.message,
-      sender: socket.userName
-    });
-
-    // Broadcast to all other users in the room
-    socket.to(data.roomId).emit("chat-message", {
-      message: data.message,
-      from: socket.id,
-      userName: socket.userName,
-      userRole: socket.userRole
-    });
-  });
-
-  // ✅ ADD: Handle typing indicators if needed
-  socket.on("typing-start", (data) => {
-    socket.to(data.roomId).emit("user-typing", {
-      userName: socket.userName,
-      isTyping: true
-    });
-  });
-
-  socket.on("typing-stop", (data) => {
-    socket.to(data.roomId).emit("user-typing", {
-      userName: socket.userName,
-      isTyping: false
-    });
-  });
-
   // Get room participants
   socket.on("get-room-participants", (roomId) => {
     if (examRooms.has(roomId)) {
@@ -463,14 +635,16 @@ const startServer = async () => {
     await mongoose.connect(process.env.MONGO_URL);
     console.log("✅ MongoDB connected");
 
+    // ✅ FIXED: Changed from 3001 to 3000
     const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
       console.log(`✅ Server running at http://localhost:${PORT}`);
       console.log(`✅ Socket.IO: ENABLED with room management`);
+      console.log(`✅ CHAT SYSTEM: ENABLED with real-time messaging`);
       console.log(`✅ CORS: Enabled for ${process.env.FRONTEND_URL || "http://localhost:5173"}`);
-      console.log(`✅ CHAT: Enabled with real-time messaging`);
       console.log(`✅ TIMER SYNC: Enabled for exam sessions`);
       console.log(`✅ DETECTION SETTINGS: Enabled for individual student control`);
+      console.log(`✅ DEBUG: Routes available at /api/debug-routes`);
     });
   } catch (err) {
     console.error("❌ Server startup error:", err);

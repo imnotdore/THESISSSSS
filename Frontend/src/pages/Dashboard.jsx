@@ -1,7 +1,7 @@
-// src/components/Dashboard.jsx - COMPLETE FIXED VERSION WITH SETTINGS
+// src/components/Dashboard.jsx - NOTIFICATION BELL AND DASHBOARD PAGE REMOVED
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { FaPlus, FaHome, FaCalendarAlt, FaArchive, FaCog, FaSignOutAlt, FaBook, FaUserPlus, FaBars, FaChevronLeft, FaChevronRight, FaEdit, FaTrash, FaEllipsisV, FaChevronDown, FaEnvelope, FaUserMinus, FaVolumeMute, FaVolumeUp, FaSave, FaTimes, FaBell, FaBellSlash } from "react-icons/fa";
+import { FaPlus, FaHome, FaCalendarAlt, FaArchive, FaCog, FaSignOutAlt, FaBook, FaUserPlus, FaBars, FaChevronLeft, FaChevronRight, FaEdit, FaTrash, FaEllipsisV, FaChevronDown, FaEnvelope, FaUserMinus, FaVolumeMute, FaVolumeUp, FaSave, FaTimes } from "react-icons/fa";
 import api, { 
   deleteAllQuizzes, 
   deleteQuiz, 
@@ -10,8 +10,8 @@ import api, {
 } from "../lib/api";
 import "./Dashboard.css";
 
-// In Frontend/src/pages/Dashboard.jsx - Add to header-right section
-import NotificationBell from '../components/NotificationBell';
+// ✅ NOTIFICATION BELL IMPORT REMOVED
+import ChatForum from '../components/ChatForum';
 
 export default function Dashboard() {
   // ===== ROUTING HOOKS =====
@@ -37,8 +37,7 @@ export default function Dashboard() {
     name: "",
     email: "",
     profilePicture: "",
-    notifications: true,
-    emailNotifications: true
+    // ✅ NOTIFICATION SETTINGS REMOVED
   });
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -138,8 +137,7 @@ export default function Dashboard() {
       name: user.name,
       email: user.email,
       profilePicture: user.profilePicture || '',
-      notifications: true,
-      emailNotifications: true
+      // ✅ NOTIFICATION SETTINGS REMOVED
     });
     setShowSettingsModal(true);
   };
@@ -1235,6 +1233,24 @@ export default function Dashboard() {
     return colors[Math.floor(Math.random() * colors.length)];
   };
 
+  // ===== CHAT TAB RENDERER =====
+  const renderChatTab = () => {
+    if (!selectedClass) return null;
+    
+    return (
+      <div className="chat-tab">
+        <ChatForum 
+          classId={selectedClass._id} 
+          currentUser={{
+            id: user._id,
+            role: selectedClass.userRole,
+            name: user.name
+          }}
+        />
+      </div>
+    );
+  };
+
   // ===== SETTINGS MODAL COMPONENT =====
   const SettingsModal = () => {
     if (!showSettingsModal) return null;
@@ -1310,50 +1326,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Notification Settings */}
-            <div className="mb-8">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Notification Preferences</h3>
-              
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <FaBell className="w-5 h-5 text-gray-600" />
-                    <div>
-                      <p className="font-medium text-gray-900">Push Notifications</p>
-                      <p className="text-sm text-gray-600">Receive browser notifications</p>
-                    </div>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settingsData.notifications}
-                      onChange={(e) => handleSettingsInputChange('notifications', e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <FaEnvelope className="w-5 h-5 text-gray-600" />
-                    <div>
-                      <p className="font-medium text-gray-900">Email Notifications</p>
-                      <p className="text-sm text-gray-600">Receive email updates</p>
-                    </div>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settingsData.emailNotifications}
-                      onChange={(e) => handleSettingsInputChange('emailNotifications', e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-              </div>
-            </div>
+            {/* ✅ NOTIFICATION SETTINGS SECTION REMOVED */}
 
             {/* Account Settings */}
             <div className="mb-8">
@@ -1813,6 +1786,21 @@ export default function Dashboard() {
         className="class-card bg-white rounded-lg shadow-md hover:shadow-lg transition-all duration-200 border border-gray-200 cursor-pointer relative overflow-visible"
         onClick={() => handleSelectClass(classData)}
       >
+        {/* CHAT BUTTON */}
+        <div className="absolute top-3 left-3 z-40">
+          <button 
+            className="p-2 rounded-full hover:bg-blue-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50 shadow-md border border-blue-200 text-blue-600"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSelectClass(classData);
+              setActiveTab("chat");
+            }}
+            title="Open Class Chat"
+          >
+            💬
+          </button>
+        </div>
+
         <div className="absolute top-3 right-3 z-50">
           <button 
             className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shadow-md border border-gray-200"
@@ -2673,10 +2661,7 @@ const renderPeopleTab = () => {
                     className="stream-settings-btn"
                     onClick={() => setShowAnnouncementModal(true)}
                   >
-                    <svg className="settings-icon" focusable="false" width="18" height="18" viewBox="0 0 24 24">
-                      <path d="M13.85 22.25h-3.7c-.74 0-1.36-.54-1.45-1.27l-.27-1.89c-.27-.14-.53-.29-.79-.46l-1.8.72c-.7.26-1.47-.03-1.81-.65L2.2 15.53c-.35-.66-.2-1.44.36-1.88l1.53-1.19c-.01-.15-.02-.3-.02-.46 0-.15.01-.31.02-.46l-1.52-1.19c-.59-.45-.74-1.26-.37-1.88l1.85-3.19c-.34-.62-1.11-.9-1.79-.63l1.81.73c.26-.17.52-.32.78-.46l.27-1.91c.09-.7.71-1.25 1.44-1.25h3.7c.74 0 1.36.54 1.45 1.27l.27 1.89c.27.14.53.29.79.46l1.8-.72c.71-.26 1.48.03 1.82.65l1.84 3.18c.36.66.2 1.44-.36 1.88l-1.52 1.19c.01.15.02.3.02.46s-.01.31-.02.46l1.52 1.19c.56.45.72 1.23.37 1.86l-1.86 3.22c-.34.62-1.11.9-1.8.63l-1.8-.72c-.26.17-.52.32-.78.46l-.27 1.91c-.1.68-.72 1.22-1.46 1.22zm-3.23-2h2.76l.37-2.55.53-.22c.44-.18.88-.44 1.34-.78l.45-.34 2.38.96 1.38-2.4-2.03-1.58.07-.56c.03-.26.06-.51.06-.78s-.03-.53-.06-.78l-.07-.56 2.03-1.58-1.39-2.4-2.39.96-.45-.35c-.42-.32-.87-.58-1.33-.77l-.52-.22-.37-2.55h-2.76l-.37 2.55-.53.21c-.44.19-.88.44-1.34.79l-.45.33-2.38-.95-1.39 2.39 2.03 1.58-.07.56a7 7 0 0 0-.06.79c0 .26.02.53.06.78l.07.56-2.03 1.58 1.38 2.4 2.39-.96.45.35c.43.33.86.58 1.33.77l.53.22.38 2.55z"></path>
-                      <circle cx="12" cy="12" r="3.5"></circle>
-                    </svg>
+                    
                     Create announcement
                   </button>
                 )}
@@ -3020,38 +3005,61 @@ const renderPeopleTab = () => {
             </div>
           </div>
 
+          {/* UPDATED TAB NAVIGATION - REMOVED STREAM, PEOPLE, GRADE TABS FOR STUDENT */}
           <div className="classroom-tabs">
-            <button 
-              className={`classroom-tab ${activeTab === "stream" ? "active" : ""}`}
-              onClick={() => setActiveTab("stream")}
-            >
-              Stream
-            </button>
-            <button 
-              className={`classroom-tab ${activeTab === "classwork" ? "active" : ""}`}
-              onClick={() => setActiveTab("classwork")}
-            >
-              Classwork
-            </button>
-            <button 
-              className={`classroom-tab ${activeTab === "people" ? "active" : ""}`}
-              onClick={() => setActiveTab("people")}
-            >
-              People
-            </button>
-            <button 
-              className={`classroom-tab ${activeTab === "grades" ? "active" : ""}`}
-              onClick={() => setActiveTab("grades")}
-            >
-              Grades
-            </button>
+            {/* Teacher View - Removed Stream tab */}
+            {selectedClass?.userRole === "teacher" && (
+              <>
+                <button 
+                  className={`classroom-tab ${activeTab === "classwork" ? "active" : ""}`}
+                  onClick={() => setActiveTab("classwork")}
+                >
+                  Classwork
+                </button>
+                <button 
+                  className={`classroom-tab ${activeTab === "people" ? "active" : ""}`}
+                  onClick={() => setActiveTab("people")}
+                >
+                  People
+                </button>
+                <button 
+                  className={`classroom-tab ${activeTab === "chat" ? "active" : ""}`}
+                  onClick={() => setActiveTab("chat")}
+                >
+                  Chat 
+                </button>
+                <button 
+                  className={`classroom-tab ${activeTab === "grades" ? "active" : ""}`}
+                  onClick={() => setActiveTab("grades")}
+                >
+                  Grades
+                </button>
+              </>
+            )}
+            
+            {/* Student View - Removed Stream, People, Grade tabs */}
+            {selectedClass?.userRole === "student" && (
+              <>
+                <button 
+                  className={`classroom-tab ${activeTab === "classwork" ? "active" : ""}`}
+                  onClick={() => setActiveTab("classwork")}
+                >
+                  Classwork
+                </button>
+                <button 
+                  className={`classroom-tab ${activeTab === "chat" ? "active" : ""}`}
+                  onClick={() => setActiveTab("chat")}
+                >
+                  Chat 
+                </button>
+              </>
+            )}
           </div>
 
           {activeTab === "stream" && (
             <div className="stream-tab">
-              <div className="class-banner-section">
-                <div className="class-banner" style={{backgroundImage: `url('src/assets/earist.jpg')`}}>
-                  <div className="banner-overlay"></div>
+              <div >
+                <div >
                 </div>
                 <div className="class-title-section">
                   <h1 className="class-main-title">{selectedClass.name}</h1>
@@ -3111,6 +3119,8 @@ const renderPeopleTab = () => {
           {activeTab === "classwork" && renderClassworkTab()}
 
           {activeTab === "people" && renderPeopleTab()}
+
+          {activeTab === "chat" && renderChatTab()}
 
           {activeTab === "grades" && (
             <div className="grades-tab">
@@ -3244,18 +3254,7 @@ const renderPeopleTab = () => {
             </button>
           </div>
           
-          <div className="settings-item">
-            <div className="settings-item-content">
-              <h4>Notification Preferences</h4>
-              <p>Control how and when you receive notifications</p>
-            </div>
-            <button 
-              className="settings-btn"
-              onClick={handleManageSettings}
-            >
-              Manage
-            </button>
-          </div>
+          {/* ✅ NOTIFICATION PREFERENCES ITEM REMOVED */}
           
           <div className="settings-item">
             <div className="settings-item-content">
@@ -3322,8 +3321,7 @@ const renderPeopleTab = () => {
         </div>
 
         <div className="header-right">
-          {/* In the header-right div, add: */}
-          <NotificationBell />
+          {/* ✅ NOTIFICATION BELL COMPONENT REMOVED */}
           
           {/* CREATE/JOIN DROPDOWN */}
           <div className="plus-btn-container" ref={createJoinDropdownRef}>

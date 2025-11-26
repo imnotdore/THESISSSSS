@@ -1,4 +1,4 @@
-// backend/models/user.js - UPDATED WITH NOTIFICATION PREFERENCES
+// backend/models/user.js - UPDATED WITH NOTIFICATION PREFERENCES (THEME REMOVED)
 const mongoose = require("mongoose");
 
 const UserSchema = new mongoose.Schema({
