@@ -1107,6 +1107,21 @@ const [studentAttempts, setStudentAttempts] = useState({
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
 
+  // ==================== DEBUG EFFECTS ====================
+  
+  // Add this after your refs declarations
+  useEffect(() => {
+    console.log('📨 Student - Current messages state:', messages);
+  }, [messages]);
+
+  useEffect(() => {
+    console.log('🔌 Student - Socket status:', {
+      connected: socketRef.current?.connected,
+      id: socketRef.current?.id,
+      examId: examId
+    });
+  }, [socketRef.current, examId]);
+
   // ==================== PERMISSION HANDLERS ====================
   const handlePermissionsGranted = useCallback(() => {
     setPermissionsGranted(true);
@@ -1119,44 +1134,75 @@ const [studentAttempts, setStudentAttempts] = useState({
   }, [navigate]);
 
   // ==================== CHAT FUNCTIONS ====================
-  const handleSendMessage = (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !socketRef.current) return;
+const handleSendMessage = (e) => {
+  e.preventDefault();
+  if (!newMessage.trim() || !socketRef.current) return;
 
-    const messageData = {
-      id: Date.now().toString(),
-      text: newMessage.trim(),
-      sender: 'student',
-      senderName: 'Student',
-      timestamp: new Date(),
-      type: 'student'
-    };
-
-    // Send to teacher and other students
-    socketRef.current.emit('send-chat-message', {
-      roomId: `exam-${examId}`,
-      message: messageData
-    });
-
-    // Add to local messages
-    setMessages(prev => [...prev, messageData]);
-    setNewMessage('');
+  // Generate a unique ID for this message
+  const messageId = `student-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  const messageData = {
+    id: messageId,
+    text: newMessage.trim(),
+    sender: 'student',
+    senderName: 'Student',
+    timestamp: new Date(),
+    type: 'student'
   };
 
-  const handleChatMessage = useCallback((data) => {
-    console.log('💬 Student received chat message:', data);
+  // Add to local messages immediately
+  setMessages(prev => [...prev, messageData]);
+  setNewMessage('');
+
+  // Send to teacher and other students
+  socketRef.current.emit('send-exam-chat-message', {
+    roomId: `exam-${examId}`,
+    message: messageData
+  });
+
+  console.log('📤 Student sent message:', messageData);
+};
+
+const handleChatMessage = useCallback((data) => {
+  console.log('💬 Student received chat message:', data);
+  
+  if (!data.message) {
+    console.error('❌ Invalid chat message format:', data);
+    return;
+  }
+
+  // Use the message ID from the data to prevent duplicates
+  const messageId = data.message.id;
+  
+  setMessages(prev => {
+    // Check for duplicate message using the ID
+    const isDuplicate = prev.some(msg => msg.id === messageId);
+    
+    if (isDuplicate) {
+      console.log('🔄 Skipping duplicate message in student');
+      return prev;
+    }
+
     const newMessage = {
-      ...data.message,
-      timestamp: new Date(data.message.timestamp)
+      id: messageId,
+      text: data.message.text,
+      sender: data.message.sender,
+      senderName: data.message.senderName || 'Teacher',
+      timestamp: new Date(data.message.timestamp),
+      type: data.message.type || 'teacher'
     };
     
-    setMessages(prev => [...prev, newMessage]);
+    console.log('💾 Adding message to student state:', newMessage);
     
-    // Increment unread count if chat is closed
-    if (!showChat) {
-      setUnreadCount(prev => prev + 1);
-    }
-  }, [showChat]);
+    const updatedMessages = [...prev, newMessage];
+    console.log('📝 Student messages count:', updatedMessages.length);
+    return updatedMessages;
+  });
+  
+  if (!showChat) {
+    setUnreadCount(prev => prev + 1);
+  }
+}, [showChat]);
 
   const toggleChat = () => {
     setShowChat(prev => {
@@ -1285,6 +1331,8 @@ newSocket.on('student-violation', (data) => {
   }
 });
 
+
+
 // Sa useEffect ng socket setup, idagdag ang mga sumusunod:
 newSocket.on('exam-started', (data) => {
   console.log('✅ Exam started by teacher:', data);
@@ -1333,47 +1381,6 @@ newSocket.on('teacher-disconnect', (data) => {
   }, 3000);
 });
 
-  newSocket.on('detection-settings-update', (data) => {
-    console.log('🎯 Received detection settings from teacher:', data);
-    
-    if (data.settings) {
-      setTeacherDetectionSettings(prev => ({
-        ...prev,
-        ...data.settings
-      }));
-      
-      console.log('✅ UPDATED DETECTION SETTINGS:', data.settings);
-      
-      const changedSettings = Object.entries(data.settings)
-        .map(([key, value]) => `${key}: ${value ? '✅ ON' : '❌ OFF'}`)
-        .join(', ');
-      
-      setProctoringAlerts(prev => [{
-        id: Date.now(),
-        message: `🎯 Teacher updated: ${changedSettings}`,
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'info'
-      }, ...prev.slice(0, 4)]);
-      
-      if (socketRef.current) {
-        socketRef.current.emit('detection-settings-confirmation', {
-          teacherSocketId: data.from,
-          studentName: 'Student',
-          settings: data.settings,
-          receivedAt: new Date().toISOString()
-        });
-      }
-    }
-    
-    if (data.customMessage) {
-      setProctoringAlerts(prev => [{
-        id: Date.now() + 1,
-        message: `📝 Teacher: ${data.customMessage}`,
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'info'
-      }, ...prev.slice(0, 4)]);
-    }
-  });
 
   // ✅ TIMER SYNC LISTENERS
   newSocket.on('exam-time-update', (data) => {
@@ -1395,14 +1402,7 @@ newSocket.on('teacher-disconnect', (data) => {
   newSocket.on('webrtc-answer', handleWebRTCAnswer);
   newSocket.on('ice-candidate', handleICECandidate);
   newSocket.on('proctoring-alert', handleProctoringAlert);
-  newSocket.on('chat-message', handleChatMessage);
-
-
-
-
-
-
-
+  newSocket.on('chat-message', handleChatMessage)
 
   socketRef.current = newSocket;
 
@@ -1829,7 +1829,7 @@ const handleProctoringAlert = useCallback((alertData) => {
   const progressPercentage = (answeredCount / (quiz?.questions?.length || 1)) * 100;
 
   // Show permission check first
-  // Palitan ang existing na permission check logic:
+// ==================== WAITING ROOM LOGIC ====================
 if (!examStarted) {
   return (
     <WaitingRoomComponent 
@@ -1846,6 +1846,8 @@ if (!examStarted) {
     />
   );
 }
+
+
 const logEvent = (eventName, data) => {
   console.log(`🎯 ${eventName} at ${new Date().toLocaleTimeString()}:`, data);
 };
