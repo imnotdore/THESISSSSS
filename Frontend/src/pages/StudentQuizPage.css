@@ -3027,3 +3027,20 @@
   font-size: 12px;
   opacity: 0.8;
 }
+
+
+.exam-type-indicator {
+  background: #f0f0f0;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 500;
+  margin-right: 10px;
+  border: 1px solid #ddd;
+}
+
+.exam-type-indicator:before {
+  content: "•";
+  margin-right: 6px;
+  color: #666;
+}

@@ -1,4 +1,4 @@
-// server.js - COMPLETELY FIXED VERSION WITH CHAT FORUM (THEME REMOVED)
+// server.js - COMPLETELY FIXED VERSION (CHAT REMOVED) WITH COMMENT SUPPORT
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -8,7 +8,6 @@ const dotenv = require("dotenv");
 const cookieParser = require("cookie-parser");
 const path = require("path");
 const jwt = require("jsonwebtoken");
-const ChatMessage = require("./models/ChatMessage"); // ✅ ADD CHAT MESSAGE MODEL
 const adminAuthRoutes = require('./routes/adminAuth');
 const adminDashboardRoutes = require('./routes/adminDashboard');
 
@@ -43,9 +42,6 @@ const io = new Server(server, {
   pingInterval: 10000
 });
 
-
-
-
 // ===== MIDDLEWARES =====
 app.use(cors({ 
   origin: [
@@ -74,7 +70,8 @@ app.use("/api/classwork", require("./routes/classwork"));
 app.use("/api/announcements", require("./routes/announcements"));
 app.use("/api/student-management", require("./routes/studentManagement"));
 app.use("/api/notifications", require("./routes/notifications"));
-app.use("/api/chat", require("./routes/chatRoutes")); // ✅ ADD CHAT ROUTES
+
+// CHAT ROUTES COMPLETELY REMOVED
 // THEME ROUTES COMPLETELY REMOVED
 
 // ✅ ADD DEBUG ROUTE TO TEST ALL REGISTERED ROUTES
@@ -104,7 +101,6 @@ app.get("/api/debug-routes", (req, res) => {
   });
 });
 
-
 // Sa server.js, idagdag ito bago ang health check:
 app.post('/api/proctoring-alert', async (req, res) => {
   try {
@@ -133,18 +129,29 @@ app.post('/api/proctoring-alert', async (req, res) => {
   }
 });
 
-
 // ===== HEALTH CHECK =====
 app.get("/api/health", (req, res) => {
   res.json({ 
     status: "OK", 
     message: "Server is running",
     socketIO: "ENABLED",
-    chat: "ENABLED",
+    realTimeComments: "ENABLED",
+    // CHAT STATUS REMOVED
     // THEME STATUS REMOVED
     timestamp: new Date().toISOString()
   });
 });
+
+// ===== COMMENT BROADCASTING FUNCTIONS =====
+const broadcastNewComment = (quizId, comment) => {
+  console.log(`📝 Broadcasting new comment to quiz-comments-${quizId}:`, comment._id);
+  io.to(`quiz-comments-${quizId}`).emit('new-comment', comment);
+};
+
+const broadcastDeletedComment = (quizId, commentId) => {
+  console.log(`🗑️ Broadcasting deleted comment to quiz-comments-${quizId}:`, commentId);
+  io.to(`quiz-comments-${quizId}`).emit('comment-deleted', commentId);
+};
 
 // ===== SOCKET.IO AUTHENTICATION =====
 io.use((socket, next) => {
@@ -174,6 +181,12 @@ io.use((socket, next) => {
 // ===== SOCKET.IO ROOM MANAGEMENT =====
 const examRooms = new Map();
 const pendingCameraRequests = new Set();
+const endedExams = new Set(); // ✅ ADD THIS: Track ended exams
+
+// Add this helper function
+const isExamEnded = (examId) => {
+  return endedExams.has(`exam-${examId}`);
+};
 
 io.on("connection", (socket) => {
   console.log("✅ Socket connected:", socket.id, "User:", socket.userName, "Role:", socket.userRole);
@@ -206,43 +219,11 @@ const saveStudentAttempts = (studentId, examId, attempts) => {
 };
 
 
-  // ===== CLASS CHAT HANDLERS =====
-  socket.on("join-class-chat", async ({ classId }) => {
-    try {
-      socket.join(`class-chat-${classId}`);
-      console.log(`💬 User ${socket.userName} joined class chat: ${classId}`);
-      
-      // Send chat history to the user
-      const messages = await ChatMessage.find({ 
-        classId, 
-        isDeleted: false 
-      })
-      .populate("userId", "name email")
-      .sort({ createdAt: 1 })
-      .limit(50)
-      .lean();
-
-      const formattedMessages = messages.map(msg => ({
-        _id: msg._id,
-        classId: msg.classId,
-        userId: {
-          _id: msg.userId._id,
-          name: msg.userId.name,
-          email: msg.userId.email
-        },
-        userName: msg.userName || msg.userId.name,
-        userRole: msg.userRole,
-        message: msg.message,
-        replies: msg.replies || [],
-        createdAt: msg.createdAt,
-        updatedAt: msg.updatedAt
-      }));
-
-      socket.emit("chat-history", formattedMessages);
-      
-    } catch (error) {
-      console.error('❌ Error joining class chat:', error);
-    }
+  // ===== REAL-TIME COMMENT HANDLERS =====
+  socket.on('join-quiz-comments', ({ quizId }) => {
+    const roomName = `quiz-comments-${quizId}`;
+    socket.join(roomName);
+    console.log(`📝 User ${socket.userName} joined quiz comments room: ${roomName}`);
   });
 
 
@@ -408,6 +389,271 @@ socket.on('proctoring-violation', (data) => {
     timestamp: new Date().toISOString()
   });
 });
+
+
+// Sa socket.on('student-time-request')
+socket.on('student-time-request', (data) => {
+  console.log('🕒 Student requesting current time:', data.studentSocketId);
+  
+  const room = examRooms.get(data.roomId);
+  if (room) {
+    socket.emit('send-current-time', {
+      studentSocketId: data.studentSocketId,
+      timeLeft: room.timeLeft || 600,
+      isTimerRunning: room.isTimerRunning || false,
+      examStarted: room.examStarted || false
+    });
+    
+    console.log('✅ Sent current time to student:', {
+      time: room.timeLeft,
+      running: room.isTimerRunning,
+      student: data.studentSocketId
+    });
+  }
+});
+
+// ===== TIMER MANAGEMENT FUNCTIONS =====
+const calculateRemainingTime = (timerState) => {
+  if (!timerState || !timerState.isRunning || !timerState.startedAt) {
+    return timerState?.remainingSeconds || 0;
+  }
+  
+  const now = new Date();
+  const lastUpdated = timerState.lastUpdated || timerState.startedAt;
+  const elapsedSeconds = Math.floor((now - lastUpdated) / 1000);
+  const remaining = Math.max(0, (timerState.remainingSeconds || 0) - elapsedSeconds);
+  
+  return remaining;
+};
+
+const updateRoomTimer = (roomId, room) => {
+  if (!room || !room.timerState) return;
+  
+  const remaining = calculateRemainingTime(room.timerState);
+  room.timeLeft = remaining;
+  
+  // Update the room's timer state
+  room.timerState.remainingSeconds = remaining;
+  room.timerState.lastUpdated = new Date();
+  
+  return remaining;
+};
+
+const startTimerForRoom = async (roomId, examId, totalSeconds) => {
+  const room = examRooms.get(roomId);
+  if (!room) return;
+  
+  room.timerState = {
+    remainingSeconds: totalSeconds,
+    totalDuration: totalSeconds,
+    isRunning: true,
+    startedAt: new Date(),
+    lastUpdated: new Date(),
+    pausedAt: null
+  };
+  
+  room.timeLeft = totalSeconds;
+  room.isTimerRunning = true;
+  
+  // Also update in database
+  try {
+    const Exam = require('../models/Exam');
+    await Exam.findByIdAndUpdate(examId, {
+      'timerState.remainingSeconds': totalSeconds,
+      'timerState.totalDuration': totalSeconds,
+      'timerState.isRunning': true,
+      'timerState.startedAt': new Date(),
+      'timerState.lastUpdated': new Date()
+    });
+  } catch (error) {
+    console.error('Error saving timer to DB:', error);
+  }
+};
+
+const pauseTimerForRoom = async (roomId, examId) => {
+  const room = examRooms.get(roomId);
+  if (!room || !room.timerState) return;
+  
+  const remaining = calculateRemainingTime(room.timerState);
+  
+  room.timerState.isRunning = false;
+  room.timerState.remainingSeconds = remaining;
+  room.timerState.pausedAt = new Date();
+  room.timerState.lastUpdated = new Date();
+  
+  room.timeLeft = remaining;
+  room.isTimerRunning = false;
+  
+  // Update in database
+  try {
+    const Exam = require('../models/Exam');
+    await Exam.findByIdAndUpdate(examId, {
+      'timerState.remainingSeconds': remaining,
+      'timerState.isRunning': false,
+      'timerState.pausedAt': new Date(),
+      'timerState.lastUpdated': new Date()
+    });
+  } catch (error) {
+    console.error('Error pausing timer in DB:', error);
+  }
+};
+
+const resumeTimerForRoom = async (roomId, examId) => {
+  const room = examRooms.get(roomId);
+  if (!room || !room.timerState) return;
+  
+  room.timerState.isRunning = true;
+  room.timerState.pausedAt = null;
+  room.timerState.lastUpdated = new Date();
+  
+  room.isTimerRunning = true;
+  
+  // Update in database
+  try {
+    const Exam = require('../models/Exam');
+    await Exam.findByIdAndUpdate(examId, {
+      'timerState.isRunning': true,
+      'timerState.pausedAt': null,
+      'timerState.lastUpdated': new Date()
+    });
+  } catch (error) {
+    console.error('Error resuming timer in DB:', error);
+  }
+};
+
+// Timer interval to update all rooms
+const timerInterval = setInterval(() => {
+  examRooms.forEach((room, roomId) => {
+    if (room.timerState && room.timerState.isRunning) {
+      const remaining = calculateRemainingTime(room.timerState);
+      room.timeLeft = remaining;
+      
+      // Broadcast update to all in room
+      io.to(roomId).emit('exam-time-update', {
+        roomId: roomId,
+        timeLeft: remaining,
+        isTimerRunning: true,
+        timestamp: Date.now(),
+        teacherName: 'System'
+      });
+      
+      // Auto-end if time is up
+      if (remaining <= 0) {
+        console.log(`⏰ Time expired for room ${roomId}`);
+        io.to(roomId).emit('exam-ended', {
+          roomId: roomId,
+          message: 'Time is up!',
+          examId: roomId.replace('exam-', '')
+        });
+        
+        // Stop timer
+        room.timerState.isRunning = false;
+        room.isTimerRunning = false;
+      }
+    }
+  });
+}, 1000); // Update every second
+
+// ✅ TIMER CONTROL HANDLERS
+socket.on('start-exam-timer', async (data) => {
+  console.log('⏰ Starting persistent timer for exam:', {
+    examId: data.examId,
+    roomId: data.roomId,
+    totalSeconds: data.totalSeconds
+  });
+  
+  await startTimerForRoom(data.roomId, data.examId, data.totalSeconds);
+  
+  // Broadcast to all in room
+  io.to(data.roomId).emit('exam-time-update', {
+    roomId: data.roomId,
+    timeLeft: data.totalSeconds,
+    isTimerRunning: true,
+    timestamp: Date.now(),
+    teacherName: 'Teacher'
+  });
+});
+
+socket.on('pause-exam-timer', async (data) => {
+  console.log('⏸️ Pausing timer for exam:', data.examId);
+  await pauseTimerForRoom(data.roomId, data.examId);
+  
+  // Broadcast pause state
+  const room = examRooms.get(data.roomId);
+  if (room) {
+    io.to(data.roomId).emit('exam-time-update', {
+      roomId: data.roomId,
+      timeLeft: room.timeLeft,
+      isTimerRunning: false,
+      timestamp: Date.now(),
+      teacherName: 'Teacher'
+    });
+  }
+});
+
+socket.on('resume-exam-timer', async (data) => {
+  console.log('▶️ Resuming timer for exam:', data.examId);
+  await resumeTimerForRoom(data.roomId, data.examId);
+  
+  // Broadcast resume state
+  const room = examRooms.get(data.roomId);
+  if (room) {
+    io.to(data.roomId).emit('exam-time-update', {
+      roomId: data.roomId,
+      timeLeft: room.timeLeft,
+      isTimerRunning: true,
+      timestamp: Date.now(),
+      teacherName: 'Teacher'
+    });
+  }
+});
+
+socket.on('add-time-to-exam', async (data) => {
+  console.log('➕ Adding time to exam:', {
+    examId: data.examId,
+    additionalSeconds: data.additionalSeconds
+  });
+  
+  const room = examRooms.get(data.roomId);
+  if (room && room.timerState) {
+    const additionalSeconds = data.additionalSeconds || 300; // default 5 minutes
+    
+    if (room.timerState.isRunning) {
+      // If running, add to remaining time
+      room.timerState.remainingSeconds += additionalSeconds;
+    } else {
+      // If paused, add to total duration
+      room.timerState.totalDuration += additionalSeconds;
+      room.timerState.remainingSeconds += additionalSeconds;
+    }
+    
+    room.timeLeft = room.timerState.remainingSeconds;
+    room.timerState.lastUpdated = new Date();
+    
+    // Update database
+    try {
+      const Exam = require('../models/Exam');
+      await Exam.findByIdAndUpdate(data.examId, {
+        'timerState.remainingSeconds': room.timerState.remainingSeconds,
+        'timerState.totalDuration': room.timerState.totalDuration,
+        'timerState.lastUpdated': new Date()
+      });
+    } catch (error) {
+      console.error('Error updating timer in DB:', error);
+    }
+    
+    // Broadcast new time
+    io.to(data.roomId).emit('exam-time-update', {
+      roomId: data.roomId,
+      timeLeft: room.timeLeft,
+      isTimerRunning: room.isTimerRunning,
+      timestamp: Date.now(),
+      teacherName: 'Teacher',
+      message: `Added ${Math.floor(additionalSeconds/60)} minutes`
+    });
+  }
+});
+
 
 // ✅ DAGDAG - STUDENT VIOLATION ALERTS (eto yung existing mo na tama)
 // REPLACE the existing student-violation handler with this:
@@ -604,24 +850,129 @@ socket.on('request-attempts-sync', (data) => {
     }
   });
 
-  socket.on('exam-ended', (data) => {
-    console.log('🛑 Teacher ended exam, broadcasting to room:', data.roomId);
-    // Broadcast to all students in the room
-    socket.to(data.roomId).emit('exam-ended', data);
-    
-    // Disconnect all students in the room
-    if (examRooms.has(data.roomId)) {
-      const room = examRooms.get(data.roomId);
-      room.students.forEach((studentInfo, studentSocketId) => {
-        socket.to(studentSocketId).emit('teacher-disconnect', {
-          reason: data.message || 'Exam ended by teacher',
-          examId: data.examId
-        });
-      });
-      // Clear the room
-      room.students.clear();
-    }
+ // ===== EXAM END HANDLER =====
+// ✅ ADD EXAM ENDED HANDLER
+socket.on('exam-ended', (data) => {
+  console.log('🛑 Teacher ending exam:', data);
+  
+  const { roomId, examId } = data;
+  
+  // ✅ MARK EXAM AS ENDED
+  endedExams.add(roomId);
+  
+  // ✅ BROADCAST TO ALL STUDENTS
+  io.to(roomId).emit('exam-ended', {
+    ...data,
+    forcedExit: true
   });
+  
+  // ✅ DISCONNECT ALL STUDENTS
+  const room = examRooms.get(roomId);
+  if (room) {
+    room.students.forEach((studentInfo, studentSocketId) => {
+      const studentSocket = io.sockets.sockets.get(studentSocketId);
+      if (studentSocket) {
+        studentSocket.emit('force-exit-exam', {
+          reason: 'Exam session has been ended by teacher',
+          examId: examId,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Kick student from room
+        studentSocket.leave(roomId);
+        console.log(`🔌 Kicked student ${studentSocketId} from room ${roomId}`);
+      }
+    });
+    
+    // Clear room data
+    room.students.clear();
+    room.examStarted = false;
+    room.isTimerRunning = false;
+  }
+  
+  console.log(`✅ Exam ${examId} marked as ended. Students cannot rejoin.`);
+});
+
+// ✅ ADD LIVE-CLASS-ENDED HANDLER
+socket.on('live-class-ended', (data) => {
+  console.log('🛑 Live class ended by teacher:', data);
+  
+  const { examId, classId, endedAt } = data;
+  const roomId = `exam-${examId}`;
+  
+  // Mark as ended
+  endedExams.add(roomId);
+  
+  // Broadcast to all in class (not just exam room)
+  io.to(`class-${classId}`).emit('live-class-ended', {
+    examId: examId,
+    classId: classId,
+    endedAt: endedAt || new Date().toISOString(),
+    message: 'Live class has ended'
+  });
+  
+  console.log(`✅ Live class ${examId} ended in class ${classId}`);
+});
+
+
+// ===== FORCE DISCONNECT HANDLER =====
+socket.on('force-disconnect-student', (data) => {
+  console.log(`🔌 Teacher force-disconnecting student:`, data);
+  
+  const { studentSocketId, reason, examId } = data;
+  
+  const studentSocket = io.sockets.sockets.get(studentSocketId);
+  if (studentSocket) {
+    // Send forced exit message
+    studentSocket.emit('force-exit-exam', {
+      reason: reason,
+      examId: examId,
+      forced: true,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Remove from room
+    const roomId = `exam-${examId}`;
+    studentSocket.leave(roomId);
+    
+    // Update room state
+    if (examRooms.has(roomId)) {
+      const room = examRooms.get(roomId);
+      room.students.delete(studentSocketId);
+    }
+    
+    console.log(`✅ Force-disconnected student ${studentSocketId}`);
+  }
+});
+
+// ===== EXAM STATUS CHECK =====
+socket.on('check-exam-status', (data) => {
+  const { examId, studentId } = data;
+  const roomId = `exam-${examId}`;
+  
+  const status = {
+    examId: examId,
+    roomId: roomId,
+    isActive: examRooms.has(roomId) && examRooms.get(roomId).examStarted,
+    isEnded: isExamEnded(examId) || endedExams.has(roomId),
+    canJoin: false,
+    message: ''
+  };
+  
+  if (status.isEnded) {
+    status.message = 'This exam session has ended.';
+    status.canJoin = false;
+  } else if (status.isActive) {
+    status.message = 'Exam is active. You can join.';
+    status.canJoin = true;
+  } else {
+    status.message = 'Exam has not started yet.';
+    status.canJoin = false;
+  }
+  
+  socket.emit('exam-status-response', status);
+  console.log(`📊 Exam status for ${examId}:`, status);
+});
 
   // Handle teacher manually disconnecting students
   socket.on('disconnect-student', (data) => {
@@ -641,18 +992,24 @@ socket.on('request-attempts-sync', (data) => {
   });
 
   // Broadcast timer updates to all students in room
-  socket.on('exam-time-update', (data) => {
-  console.log('🕒 Broadcasting timer update to room:', {
-    roomId: data.roomId,
-    timeLeft: data.timeLeft,
-    isTimerRunning: data.isTimerRunning,
-    formatted: formatTime(data.timeLeft)
-  });
+ // In server.js, fix the exam-time-update handler:
+socket.on('exam-time-update', (data) => {
+  // ✅ ENSURE WE ALWAYS SEND SECONDS
+  let timeToSend = data.timeLeft;
   
-  // ✅ BROADCAST TO ALL STUDENTS IN ROOM (REAL-TIME)
-  socket.to(data.roomId).emit('exam-time-update', data);
+  // If teacher sent minutes (value < 100), convert to seconds
+  if (timeToSend < 100 && timeToSend > 0) {
+    timeToSend = timeToSend * 60;
+    console.log(`🔄 Converted teacher time from ${data.timeLeft}min to ${timeToSend}sec`);
+  }
+  
+  // Broadcast with proper seconds
+  io.to(data.roomId).emit('exam-time-update', {
+    ...data,
+    timeLeft: timeToSend, // Always send as seconds
+    unit: 'seconds' // Add unit clarification
+  });
 });
-
 
 // Add this utility function to server.js
 const formatTime = (seconds) => {
@@ -668,6 +1025,7 @@ const formatTime = (seconds) => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 };
+
   // ===== DETECTION SETTINGS HANDLER =====
   socket.on('update-detection-settings', (data) => {
     console.log('🎯 Teacher updating detection settings for student:', data.studentSocketId);
@@ -684,9 +1042,20 @@ const formatTime = (seconds) => {
 
   // Join exam room
   socket.on("join-exam-room", ({ roomId, userName, userId, userRole }) => {
-    try {
-      currentRoom = roomId;
-      socket.join(roomId);
+  try {
+    // ✅ CHECK IF EXAM HAS ENDED
+    if (isExamEnded(roomId.replace('exam-', '')) || endedExams.has(roomId)) {
+      console.log(`❌ Blocked ${userName} from joining ended exam: ${roomId}`);
+      socket.emit('exam-unavailable', {
+        message: 'This exam session has ended',
+        examId: roomId.replace('exam-', ''),
+        endedAt: new Date().toISOString()
+      });
+      return;
+    }
+    
+    currentRoom = roomId;
+    socket.join(roomId);
       
       // Store user role for chat
       socket.userRole = userRole;
@@ -698,7 +1067,17 @@ const formatTime = (seconds) => {
       students: new Map(),
       timeLeft: 3600, // Default 1 hour
       isTimerRunning: false,
-      examStarted: false
+      examStarted: false,
+      // ✅ ADD PERSISTENT TIMER STATE
+      timerState: {
+      remainingSeconds: 0,
+      totalDuration: 0,
+      isRunning: false,
+      startedAt: null,
+      lastUpdated: new Date(),
+      pausedAt: null
+    }
+      
     });
   }
       const room = examRooms.get(roomId);
@@ -728,6 +1107,22 @@ const formatTime = (seconds) => {
         });
         console.log(`👨‍🎓 Student ${userName} joined room ${roomId}`);
         
+          // ✅ IMMEDIATELY SEND CURRENT TIMER TO NEW STUDENT
+    setTimeout(() => {
+      socket.emit('send-current-time', {
+        studentSocketId: socket.id,
+        timeLeft: room.timeLeft || 3600,
+        isTimerRunning: room.isTimerRunning || false,
+        examStarted: room.examStarted || false,
+        roomId: roomId
+      });
+      
+      console.log(`🕒 Sent timer to new student ${socket.id}:`, {
+        time: room.timeLeft,
+        running: room.isTimerRunning
+      });
+    }, 500);
+  
         // Request current time from teacher
         setTimeout(() => {
           if (room.teacher) {
@@ -761,6 +1156,85 @@ const formatTime = (seconds) => {
       socket.emit("room-join-error", { message: "Failed to join room" });
     }
   });
+
+
+  // Add a function to clear timer cache
+const clearAllTimerCache = () => {
+  // Clear localStorage
+  localStorage.removeItem(`timer-${examId}`);
+  
+  // Clear state
+  setTimeLeft(null);
+  setIsTimerRunning(false);
+  
+  // Request fresh timer from teacher
+  if (socketRef.current && socketRef.current.connected) {
+    socketRef.current.emit('student-time-request', {
+      studentSocketId: socketRef.current.id,
+      roomId: `exam-${examId}`,
+      examId: examId,
+      forceRefresh: true
+    });
+  }
+  
+  console.log('🧹 Timer cache cleared, requesting fresh timer from teacher');
+};
+
+  // Sa server.js, idagdag ito sa socket handlers
+socket.on('student-timer-sync', (data) => {
+  console.log('🔄 Student timer sync:', {
+    student: data.studentSocketId,
+    timeLeft: data.timeLeft,
+    isRunning: data.isTimerRunning,
+    examId: data.examId
+  });
+  
+  // Store in room for persistence
+  const roomId = data.roomId || `exam-${data.examId}`;
+  if (examRooms.has(roomId)) {
+    const room = examRooms.get(roomId);
+    if (room.students.has(data.studentSocketId)) {
+      const student = room.students.get(data.studentSocketId);
+      student.timerState = {
+        timeLeft: data.timeLeft,
+        isRunning: data.isTimerRunning,
+        lastUpdated: new Date()
+      };
+      console.log(`💾 Timer saved for student ${data.studentSocketId}:`, student.timerState);
+    }
+  }
+});
+
+// Add in socket.io connection handler
+socket.on('force-timer-sync', (data) => {
+  console.log('🔄 Force timer sync requested:', data);
+  
+  // Update room state
+  if (examRooms.has(data.roomId)) {
+    const room = examRooms.get(data.roomId);
+    room.timeLeft = data.timeLeft;
+    room.isTimerRunning = data.isTimerRunning;
+  }
+  
+  // Broadcast to all students with priority
+  io.to(data.roomId).emit('exam-time-update', {
+    roomId: data.roomId,
+    timeLeft: data.timeLeft,
+    isTimerRunning: data.isTimerRunning,
+    timestamp: Date.now(),
+    teacherName: 'Teacher',
+    priority: 'high',
+    forceUpdate: true
+  });
+});
+
+socket.on('clear-student-timers', (data) => {
+  io.to(data.roomId).emit('clear-timer-cache', {
+    examId: data.examId
+  });
+});
+
+
 
   // ✅ FIXED: Request student camera (teacher to student)
   socket.on("request-student-camera", ({ studentSocketId, roomId }) => {
@@ -848,6 +1322,14 @@ const formatTime = (seconds) => {
   socket.on("disconnect", (reason) => {
     console.log(`🔌 Socket disconnected: ${socket.id} - Reason: ${reason}`);
     
+    // Leave all comment rooms
+    const rooms = Array.from(socket.rooms);
+    rooms.forEach(room => {
+      if (room.startsWith('quiz-comments-')) {
+        console.log(`📝 User automatically left comment room: ${room}`);
+      }
+    });
+    
     if (currentRoom && examRooms.has(currentRoom)) {
       const room = examRooms.get(currentRoom);
       
@@ -889,6 +1371,17 @@ const formatTime = (seconds) => {
   });
 });
 
+// ===== EXPORT COMMENT FUNCTIONS FOR USE IN ROUTES =====
+module.exports = {
+  app,
+  io,
+  endedExams, // ✅ Export for use in routes
+  examRooms,
+  broadcastNewComment,
+  broadcastDeletedComment,
+  isExamEnded // ✅ Export the helper function
+};
+
 // ===== START SERVER =====
 const startServer = async () => {
   try {
@@ -900,7 +1393,8 @@ const startServer = async () => {
     server.listen(PORT, () => {
       console.log(`✅ Server running at http://localhost:${PORT}`);
       console.log(`✅ Socket.IO: ENABLED with room management`);
-      console.log(`✅ CHAT SYSTEM: ENABLED with real-time messaging`);
+      console.log(`✅ REAL-TIME COMMENTS: ENABLED for quizzes`);
+      console.log(`✅ CHAT SYSTEM: DISABLED (removed)`);
       console.log(`✅ CORS: Enabled for ${process.env.FRONTEND_URL || "http://localhost:5173"}`);
       console.log(`✅ TIMER SYNC: Enabled for exam sessions`);
       console.log(`✅ DETECTION SETTINGS: Enabled for individual student control`);
@@ -911,5 +1405,29 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
+// Function to cleanup old ended exams (run periodically)
+const cleanupEndedExams = () => {
+  const oneHourAgo = Date.now() - (60 * 60 * 1000);
+  
+  // Remove old ended exams from memory (optional - for memory management)
+  endedExams.forEach((timestamp, examId) => {
+    if (timestamp < oneHourAgo) {
+      endedExams.delete(examId);
+      console.log(`🧹 Cleaned up old ended exam: ${examId}`);
+    }
+  });
+  
+  // Also clean up examRooms for ended exams
+  examRooms.forEach((room, roomId) => {
+    if (endedExams.has(roomId) && room.students.size === 0) {
+      examRooms.delete(roomId);
+      console.log(`🧹 Cleaned up empty ended exam room: ${roomId}`);
+    }
+  });
+};
+
+// Run cleanup every hour
+setInterval(cleanupEndedExams, 60 * 60 * 1000);
 
 startServer();

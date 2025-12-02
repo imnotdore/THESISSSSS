@@ -1310,40 +1310,127 @@ export default function StudentQuizPage() {
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
 
-  // ==================== QUIZ MANAGEMENT ====================
-  const loadQuiz = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const response = await getQuizForStudent(examId);
-      
-      if (response.success) {
-        setQuiz(response.data);
-        
-        const initialAnswers = {};
-        if (response.data.questions) {
-          response.data.questions.forEach((question, index) => {
-            if (question.type === 'checkboxes') {
-              initialAnswers[index] = [];
-            } else {
-              initialAnswers[index] = '';
-            }
-          });
-        }
-        setAnswers(initialAnswers);
+const [examType, setExamType] = useState('asynchronous'); // Default to async
 
-        console.log('🕒 Waiting for teacher timer sync...');
+  // ==================== TIMER PERSISTENCE FUNCTIONS ====================
+// DAGDAGIN ito sa StudentQuizPage.jsx bago ang loadQuiz function
 
-      } else {
-        setError(response.message || 'Failed to load quiz');
-      }
-    } catch (error) {
-      console.error('Error loading quiz:', error);
-      setError('Error loading quiz. Please try again.');
-    } finally {
-      setLoading(false);
+const saveTimerToLocalStorage = (time, isRunning) => {
+  // ✅ THROTTLE SAVES - Only save every 5 seconds
+  const now = Date.now();
+  const lastSave = localStorage.getItem(`last-save-${examId}`);
+  
+  if (lastSave && now - parseInt(lastSave) < 5000) {
+    return; // Skip save if less than 5 seconds since last save
+  }
+  
+  const timerData = {
+    examId: examId,
+    timeLeft: time,
+    isTimerRunning: isRunning,
+    lastUpdated: new Date().toISOString()
+  };
+  
+  localStorage.setItem(`timer-${examId}`, JSON.stringify(timerData));
+  localStorage.setItem(`last-save-${examId}`, now.toString());
+  
+  console.log('💾 Timer saved to localStorage:', timerData);
+};
+
+
+const loadTimerFromLocalStorage = () => {
+  try {
+    const savedTimer = localStorage.getItem(`timer-${examId}`);
+    if (savedTimer) {
+      const timerData = JSON.parse(savedTimer);
+      console.log('💾 Loaded timer from localStorage:', timerData);
+      return timerData;
     }
-  }, [examId]);
+  } catch (error) {
+    console.error('Error loading timer from localStorage:', error);
+  }
+  return null;
+};
+
+const clearTimerFromLocalStorage = () => {
+  localStorage.removeItem(`timer-${examId}`);
+  console.log('🧹 Timer cleared from localStorage');
+};
+
+
+
+  // ==================== QUIZ MANAGEMENT ====================
+
+const loadQuiz = useCallback(async () => {
+  try {
+    setLoading(true);
+    setError('');
+    const response = await getQuizForStudent(examId);
+    
+    if (response.success) {
+      const quizData = response.data;
+      setQuiz(quizData);
+      
+      // ✅ SET EXAM TYPE
+      const examTypeFromData = quizData.examType || 'asynchronous';
+      setExamType(examTypeFromData);
+      
+      // ✅ FIX: ASYNCHRONOUS EXAM - AUTO-START TIMER
+      if (examTypeFromData === 'asynchronous') {
+        // For async exams, use teacher's timer settings
+        if (quizData.timerSettings?.totalSeconds) {
+          // Use detailed timer settings from teacher
+          setTimeLeft(quizData.timerSettings.totalSeconds);
+          setIsTimerRunning(true); // ✅ AUTO-START FOR ASYNC
+          console.log('⏰ Async exam - Auto-starting timer:', {
+            seconds: quizData.timerSettings.totalSeconds,
+            formatted: formatTime(quizData.timerSettings.totalSeconds)
+          });
+        } else if (quizData.timeLimit) {
+          // Fallback: convert minutes to seconds
+          const teacherTimeInSeconds = quizData.timeLimit * 60;
+          setTimeLeft(teacherTimeInSeconds);
+          setIsTimerRunning(true); // ✅ AUTO-START FOR ASYNC
+          console.log('⏰ Async exam - Auto-starting timer (converted):', {
+            minutes: quizData.timeLimit,
+            seconds: teacherTimeInSeconds
+          });
+        } else {
+          // Default fallback if no timer from teacher
+          setTimeLeft(60 * 60); // 1 hour default
+          setIsTimerRunning(true); // ✅ AUTO-START FOR ASYNC
+          console.log('⏰ Async exam - Using default timer (1 hour)');
+        }
+      } else if (examTypeFromData === 'live-class') {
+        // For live classes, wait for teacher to start
+        setTimeLeft(0); // No timer for live class
+        setIsTimerRunning(false);
+        console.log('🎥 Live class exam - Waiting for teacher');
+      }
+      
+      // Load answers as before
+      const initialAnswers = {};
+      if (quizData.questions) {
+        quizData.questions.forEach((question, index) => {
+          if (question.type === 'checkboxes') {
+            initialAnswers[index] = [];
+          } else {
+            initialAnswers[index] = '';
+          }
+        });
+      }
+      setAnswers(initialAnswers);
+
+    } else {
+      setError(response.message || 'Failed to load quiz');
+    }
+  } catch (error) {
+    console.error('Error loading quiz:', error);
+    setError('Error loading quiz. Please try again.');
+  } finally {
+    setLoading(false);
+  }
+}, [examId]);
 
   const handleAnswerChange = useCallback((questionIndex, value) => {
     setAnswers(prev => {
@@ -1386,7 +1473,9 @@ export default function StudentQuizPage() {
       
       if (submissionResponse.success) {
         console.log('✅ Quiz answers submitted successfully');
-        
+         // ✅ CLEAR TIMER FROM LOCALSTORAGE
+      clearTimerFromLocalStorage();
+
         try {
           await api.post(`/exams/${examId}/complete`, {
             score: submissionResponse.data.score,
@@ -1596,26 +1685,75 @@ useEffect(() => {
     navigate('/dashboard');
   }, [navigate]);
 
-  const handleExamStart = useCallback(() => {
-    // ✅ MICROPHONE IS NOW REQUIRED FROM THE START
-    if (requiresMicrophone) {
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-          stream.getTracks().forEach(track => track.stop());
-          setExamStarted(true);
-          setPermissionsGranted(true);
-          loadQuiz();
-        })
-        .catch(error => {
-          alert('🎤 Microphone access is REQUIRED. Please grant microphone permission to start the exam.');
-          console.error('Microphone permission denied:', error);
-        });
+const handleExamStart = useCallback(() => {
+  // ✅ MICROPHONE IS NOW REQUIRED FROM THE START
+  if (requiresMicrophone) {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
+        stream.getTracks().forEach(track => track.stop());
+        setExamStarted(true);
+        setPermissionsGranted(true);
+        
+        // ✅ CHECK IF ASYNC EXAM - USE LOCAL TIMER
+        if (examType === 'asynchronous') {
+          console.log('⏰ Async exam - Starting local timer');
+          
+          // For async exams, use teacher's timer immediately
+          if (quiz?.timerSettings?.totalSeconds) {
+            setTimeLeft(quiz.timerSettings.totalSeconds);
+            setIsTimerRunning(true);
+          } else if (quiz?.timeLimit) {
+            setTimeLeft(quiz.timeLimit * 60);
+            setIsTimerRunning(true);
+          }
+          
+          // Save to localStorage
+          saveTimerToLocalStorage(timeLeft, true);
+        } else {
+          // For live classes, check saved timer
+          const savedTimer = loadTimerFromLocalStorage();
+          if (savedTimer && savedTimer.examId === examId) {
+            console.log('⏰ Resuming from saved timer:', savedTimer);
+            setTimeLeft(savedTimer.timeLeft);
+            setIsTimerRunning(savedTimer.isTimerRunning);
+          }
+        }
+        
+        loadQuiz();
+      })
+      .catch(error => {
+        alert('🎤 Microphone access is REQUIRED. Please grant microphone permission to start the exam.');
+        console.error('Microphone permission denied:', error);
+      });
+  } else {
+    setExamStarted(true);
+    setPermissionsGranted(true);
+    
+    // ✅ SIMILAR LOGIC FOR ASYNC EXAMS
+    if (examType === 'asynchronous') {
+      console.log('⏰ Async exam - Starting local timer (no mic)');
+      
+      if (quiz?.timerSettings?.totalSeconds) {
+        setTimeLeft(quiz.timerSettings.totalSeconds);
+        setIsTimerRunning(true);
+      } else if (quiz?.timeLimit) {
+        setTimeLeft(quiz.timeLimit * 60);
+        setIsTimerRunning(true);
+      }
+      
+      saveTimerToLocalStorage(timeLeft, true);
     } else {
-      setExamStarted(true);
-      setPermissionsGranted(true);
-      loadQuiz();
+      const savedTimer = loadTimerFromLocalStorage();
+      if (savedTimer && savedTimer.examId === examId) {
+        console.log('⏰ Resuming from saved timer:', savedTimer);
+        setTimeLeft(savedTimer.timeLeft);
+        setIsTimerRunning(savedTimer.isTimerRunning);
+      }
     }
-  }, [requiresMicrophone, loadQuiz]);
+    
+    loadQuiz();
+  }
+}, [requiresMicrophone, loadQuiz, examId, examType, quiz]);
 
   // ==================== SOCKET.IO SETUP ====================
   useEffect(() => {
@@ -1653,16 +1791,90 @@ useEffect(() => {
         userId: 'student-user',
         userRole: 'student'
       });
+ // ✅ CHECK IF ASYNC EXAM - DON'T WAIT FOR TEACHER TIMER
+  if (examType === 'asynchronous' && timeLeft > 0) {
+    console.log('⏰ Async exam detected - auto-starting local timer');
+    setIsTimerRunning(true);
+    
+    // Save timer state immediately
+    saveTimerToLocalStorage(timeLeft, true);
+  }
 
-      setTimeout(() => {
-        if (newSocket.connected) {
-          console.log('🕒 Requesting current time from teacher...');
-          newSocket.emit('student-time-request', {
-            studentSocketId: newSocket.id,
-            roomId: `exam-${examId}`
-          });
-        }
-      }, 1000);
+        // ✅ REQUEST TIME MULTIPLE TIMES FOR RELIABILITY
+  const requestTime = () => {
+    if (newSocket.connected) {
+      console.log('🕒 Requesting current time from teacher...');
+      newSocket.emit('student-time-request', {
+        studentSocketId: newSocket.id,
+        roomId: `exam-${examId}`
+      });
+    }
+  };
+
+
+// Add in student socket listeners
+newSocket.on('force-timer-sync', (data) => {
+  console.log('🔄 Received forced timer sync:', data);
+  
+  if (data.forceUpdate) {
+    // Clear localStorage to avoid conflicts
+    clearTimerFromLocalStorage();
+    
+    // Immediately update state
+    setTimeLeft(data.timeLeft);
+    setIsTimerRunning(data.isTimerRunning);
+    
+    // Save new time
+    saveTimerToLocalStorage(data.timeLeft, data.isTimerRunning);
+    
+    console.log('✅ Timer force-updated:', {
+      time: data.timeLeft,
+      running: data.isTimerRunning,
+      formatted: formatTime(data.timeLeft)
+    });
+  }
+});
+// In StudentQuizPage.jsx, add handler:
+newSocket.on('clear-timer-cache', (data) => {
+  if (data.examId === examId) {
+    clearTimerFromLocalStorage();
+    console.log('🧹 Timer cache cleared by teacher');
+  }
+});
+newSocket.on('send-current-time', (data) => {
+  console.log('🕒 Received time from teacher:', {
+    timeLeft: data.timeLeft,
+    isTimerRunning: data.isTimerRunning,
+    examStarted: data.examStarted
+  });
+  
+  // ✅ FIX: Check if teacher sent minutes instead of seconds
+  let receivedTime = data.timeLeft;
+  
+  // If value is less than 100 and greater than 0, assume it's minutes
+  if (receivedTime < 100 && receivedTime > 0) {
+    console.log('🔄 Converting minutes to seconds:', receivedTime, 'minutes');
+    receivedTime = receivedTime * 60; // Convert to seconds
+  }
+  
+  // ✅ ALWAYS USE TEACHER'S TIME - OVERRIDE LOCALSTORAGE
+  setTimeLeft(receivedTime);
+  setIsTimerRunning(data.isTimerRunning);
+  
+  // Save teacher's time as source of truth
+  saveTimerToLocalStorage(receivedTime, data.isTimerRunning);
+  
+  console.log('✅ Timer synced with teacher:', {
+    received: data.timeLeft,
+    converted: receivedTime,
+    formatted: formatTime(receivedTime)
+  });
+  
+  if (data.examStarted && !examStarted) {
+    setExamStarted(true);
+    setPermissionsGranted(true);
+  }
+});
 
       newSocket.on('proctoring-violation', (data) => {
         console.log('⚠️ Student received proctoring violation:', data);
@@ -1749,16 +1961,18 @@ useEffect(() => {
         });
       });
 
-      setTimeout(() => {
-        if (newSocket.connected) {
-          console.log('🕒 Requesting current time from teacher...');
-          newSocket.emit('student-time-request', {
-            studentSocketId: newSocket.id,
-            roomId: `exam-${examId}`
-          });
-        }
-      }, 1000);
-    });
+      // ✅ REQUEST CURRENT TIME - SERVER WILL SEND PERSISTENT TIMER
+  setTimeout(() => {
+    if (newSocket.connected) {
+      console.log('🕒 Requesting persistent timer from server...');
+      newSocket.emit('student-time-request', {
+        studentSocketId: newSocket.id,
+        roomId: `exam-${examId}`,
+        examId: examId
+      });
+    }
+  }, 1000);
+});
 
     newSocket.on('detection-settings-update', (data) => {
       console.log('🎯 Received detection settings from teacher:', data);
@@ -1780,14 +1994,28 @@ useEffect(() => {
     });
 
     newSocket.on('exam-started', (data) => {
-      console.log('✅ Exam started by teacher:', data);
-      setExamStarted(true);
-      setPermissionsGranted(true);
-      if (requiresCamera) setCameraActive(true);
-      if (requiresMicrophone) setMicrophoneActive(true);
-      
-      loadQuiz();
-    });
+  console.log('✅ Exam started by teacher:', data);
+  setExamStarted(true);
+  setPermissionsGranted(true);
+  if (requiresCamera) setCameraActive(true);
+  if (requiresMicrophone) setMicrophoneActive(true);
+  
+  // ✅ AUTO-START STUDENT TIMER
+  setIsTimerRunning(true);
+  
+  // Request current time from teacher
+  setTimeout(() => {
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('student-time-request', {
+        studentSocketId: socketRef.current.id,
+        roomId: `exam-${examId}`
+      });
+      console.log('🕒 Requested timer from teacher after exam start');
+    }
+  }, 1000);
+  
+  loadQuiz();
+});
 
     newSocket.on('exam-ended', (data) => {
       console.log('🛑 Exam ended by teacher:', data);
@@ -1825,16 +2053,41 @@ useEffect(() => {
       }, 3000);
     });
 
-    newSocket.on('exam-time-update', (data) => {
-      console.log('🕒 Received timer update from teacher:', {
-        timeLeft: data.timeLeft,
-        isTimerRunning: data.isTimerRunning,
-        formatted: formatTime(data.timeLeft)
-      });
-      
-      setTimeLeft(data.timeLeft);
-      setIsTimerRunning(data.isTimerRunning);
-    });
+// ADD this conversion logic:
+newSocket.on('exam-time-update', (data) => {
+   if (examType === 'asynchronous') {
+    console.log('🛑 Ignoring teacher timer update for async exam');
+    return;
+  }
+  console.log('🕒 Received timer update from teacher:', {
+    timeLeft: data.timeLeft,
+    isTimerRunning: data.isTimerRunning,
+    teacher: data.teacherName,
+    timestamp: data.timestamp
+  });
+  
+  // ✅ FIX: Convert if teacher sent minutes instead of seconds
+  let receivedTime = data.timeLeft;
+  
+  // Check if teacher sent minutes (if value is less than 100, assume minutes)
+  if (receivedTime < 100 && receivedTime > 0) {
+    console.log('🔄 Converting minutes to seconds:', receivedTime, 'minutes');
+    receivedTime = receivedTime * 60; // Convert minutes to seconds
+  }
+  
+  // Save to localStorage with proper conversion
+  saveTimerToLocalStorage(receivedTime, data.isTimerRunning);
+  
+  // Update state
+  setTimeLeft(receivedTime);
+  setIsTimerRunning(data.isTimerRunning);
+  
+  console.log('✅ Timer updated:', {
+    received: data.timeLeft,
+    converted: receivedTime,
+    formatted: formatTime(receivedTime)
+  });
+});
 
     newSocket.on('camera-request', handleCameraRequest);
     newSocket.on('webrtc-answer', handleWebRTCAnswer);
@@ -1911,6 +2164,44 @@ newSocket.on('proctoring-alert', (alertData) => {
   }
 });
 
+
+// In socket listeners:
+newSocket.on('live-class-ended', (data) => {
+  console.log('🛑 Live class ended by teacher:', data);
+  
+  if (data.examId === examId) {
+    // ✅ DISABLE JOIN BUTTON IMMEDIATELY
+    setQuiz(prev => prev ? {
+      ...prev,
+      isActive: false,
+      endedAt: data.endedAt || new Date().toISOString()
+    } : prev);
+    
+    alert('⏹️ Live class has ended. You can no longer join this session.');
+    
+    // ✅ IF CURRENTLY IN SESSION, REDIRECT OUT
+    if (examStarted) {
+      setTimeout(() => {
+        navigate('/dashboard', {
+          state: {
+            message: 'Live class has ended'
+          }
+        });
+      }, 3000);
+    }
+  }
+});
+
+newSocket.on('force-exit-exam', (data) => {
+  console.log('🔌 Force exit from exam:', data);
+  
+  alert(`🛑 ${data.reason || 'You have been disconnected from the exam.'}`);
+  
+  setTimeout(() => {
+    navigate('/dashboard');
+  }, 2000);
+});
+
     socketRef.current = newSocket;
 
     return () => {
@@ -1922,23 +2213,112 @@ newSocket.on('proctoring-alert', (alertData) => {
     };
   }, [examId]);
 
-  // ==================== TIMER EFFECT ====================
-  useEffect(() => {
-    if (timeLeft === null || !isTimerRunning) return;
 
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          handleSubmitQuiz(true);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+// ==================== STUDENT TIMER COUNTDOWN WITH PERSISTENCE ====================
+// I-update ang timer useEffect
+useEffect(() => {
+  if (timeLeft === null || !isTimerRunning) {
+    console.log('⏰ Student timer stopped:', { 
+      timeLeft, 
+      isTimerRunning,
+      examStarted,
+      examType // Add examType to logs
+    });
+    return;
+  }
 
-    return () => clearInterval(timer);
-  }, [timeLeft, isTimerRunning]);
+  console.log('⏰ Student timer STARTED:', {
+    initialTime: timeLeft,
+    formatted: formatTime(timeLeft),
+    examStarted,
+    permissionsGranted,
+    examType: examType // Log exam type
+  });
+
+  const timer = setInterval(() => {
+    setTimeLeft(prev => {
+      if (prev <= 1) {
+        clearInterval(timer);
+        console.log('⏰ Student time expired! Auto-submitting...');
+        clearTimerFromLocalStorage();
+        handleSubmitQuiz(true);
+        return 0;
+      }
+      
+      const newTime = prev - 1;
+      
+      // ✅ AUTO-SAVE TO LOCALSTORAGE EVERY 10 SECONDS
+      if (newTime % 10 === 0) {
+        saveTimerToLocalStorage(newTime, isTimerRunning);
+      }
+      
+      return newTime;
+    });
+  }, 1000);
+
+  return () => {
+    clearInterval(timer);
+    console.log('⏰ Student timer cleaned up');
+  };
+}, [timeLeft, isTimerRunning, handleSubmitQuiz, examStarted, examType]); // Add examType
+
+
+// ✅ AUTO-SAVE ON PAUSE/RESUME
+useEffect(() => {
+  if (timeLeft !== null) {
+    saveTimerToLocalStorage(timeLeft, isTimerRunning);
+    console.log('💾 Timer state saved:', {
+      time: timeLeft,
+      running: isTimerRunning
+    });
+  }
+}, [isTimerRunning, timeLeft]);
+
+// ✅ SAVE ON PAGE UNLOAD (WHEN STUDENT LEAVES)
+useEffect(() => {
+  const handleBeforeUnload = (e) => {
+    if (timeLeft !== null) {
+      saveTimerToLocalStorage(timeLeft, isTimerRunning);
+      console.log('💾 Timer saved before page unload');
+    }
+  };
+
+  window.addEventListener('beforeunload', handleBeforeUnload);
+  
+  return () => {
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+  };
+}, [timeLeft, isTimerRunning]);
+
+// ✅ RECOVER TIMER ON RECONNECT
+useEffect(() => {
+  if (socketRef.current && socketRef.current.connected && examStarted) {
+    // Re-request timer every 30 seconds to stay in sync
+    const interval = setInterval(() => {
+      if (socketRef.current && socketRef.current.connected) {
+        socketRef.current.emit('student-time-request', {
+          studentSocketId: socketRef.current.id,
+          roomId: `exam-${examId}`,
+          examId: examId
+        });
+      }
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }
+}, [examStarted, examId]);
+
+// ==================== AUTO-START TIMER WHEN RECEIVED ====================
+useEffect(() => {
+  // Auto-start timer when we receive time from teacher
+  if (timeLeft !== null && timeLeft > 0 && examStarted) {
+    // Only start if we haven't already
+    if (!isTimerRunning) {
+      console.log('🎯 Auto-starting student timer:', formatTime(timeLeft));
+      setIsTimerRunning(true);
+    }
+  }
+}, [timeLeft, examStarted, isTimerRunning]);
 
   // ==================== WEBRTC HANDLERS ====================
   const handleCameraRequest = async (data, isRetry = false) => {
@@ -2287,19 +2667,19 @@ newSocket.on('proctoring-alert', (alertData) => {
   };
 
   // ==================== UTILITY FUNCTIONS ====================
-  const formatTime = (seconds) => {
-    if (seconds === null || seconds === undefined) return '00:00';
-    
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    
-    if (hrs > 0) {
-      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    } else {
-      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-  };
+const formatTime = (seconds) => {
+  if (seconds === null || seconds === undefined) return '00:00';
+  
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  
+  if (hrs > 0) {
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  } else {
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+};
 
   // ==================== INITIALIZATION ====================
   useEffect(() => {
@@ -2434,35 +2814,62 @@ newSocket.on('proctoring-alert', (alertData) => {
             </div>
           </div>
         </div>
-        <div className="header-right">
-          {/* ✅ ATTEMPTS DISPLAY */}
-<div className="attempts-display-student">
+       <div className="header-right">
+  {/* ✅ ATTEMPTS DISPLAY */}
+   <div className="exam-type-indicator">
+    {examType === 'asynchronous' ? '⏱️ Async Exam' : '🎥 Live Class'}
+  </div>
+  <div className="attempts-display-student">
     <span className="attempts-text">
-        Attempts: {studentAttempts.attemptsLeft}/{studentAttempts.maxAttempts}
+      Attempts: {studentAttempts.attemptsLeft}/{studentAttempts.maxAttempts}
     </span>
     <span className="attempts-used">
-        Used: {studentAttempts.currentAttempts.toFixed(1)}
+      Used: {studentAttempts.currentAttempts.toFixed(1)}
     </span>
     {studentAttempts.attemptsLeft <= 3 && studentAttempts.attemptsLeft > 0 && (
-        <span className="attempts-warning">
-            ⚠️ {studentAttempts.attemptsLeft} attempt(s) left!
-        </span>
+      <span className="attempts-warning">
+        ⚠️ {studentAttempts.attemptsLeft} attempt(s) left!
+      </span>
     )}
     {studentAttempts.attemptsLeft === 0 && (
-        <span className="attempts-danger">
-            🚫 No attempts left!
-        </span>
+      <span className="attempts-danger">
+        🚫 No attempts left!
+      </span>
     )}
-</div>
+  </div>
 
-          {/* ✅ TIMER DISPLAY - SYNCED WITH TEACHER */}
-          <div className="timer-section-student">
-            <div className="timer-display-student">
-              <span className="timer-text">
-                {timeLeft !== null ? formatTime(timeLeft) : 'Loading...'}
-              </span>
-            </div>
-          </div>
+           {/* ✅ UPDATED TIMER DISPLAY - SHOW SYNC STATUS */}
+  {/* ✅ IMPROVED TIMER DISPLAY - SHOW REAL-TIME STATUS */}
+<div className="timer-section-student">
+  <div className={`timer-display-student ${isTimerRunning ? 'running' : 'paused'}`}>
+    {timeLeft !== null ? (
+      <>
+        <span className="timer-icon">
+          {isTimerRunning ? '⏱️' : '⏸️'}
+        </span>
+        <span className="timer-text">
+          {formatTime(timeLeft)}
+        </span>
+        <span className="timer-status">
+          {isTimerRunning ? 'Running' : 'Paused'}
+        </span>
+        
+        {/* Show time warnings */}
+        {timeLeft < 300 && timeLeft > 60 && (
+          <span className="time-warning-badge">⚠️ 5 min</span>
+        )}
+        {timeLeft <= 60 && timeLeft > 0 && (
+          <span className="time-critical-badge">🚨 1 min</span>
+        )}
+      </>
+    ) : (
+      <span className="timer-loading">
+        <div className="loading-spinner-tiny"></div>
+        Syncing timer...
+      </span>
+    )}
+  </div>
+</div>
 
           {(requiresCamera || requiresMicrophone) && (
             <div className="monitoring-status-header">
@@ -2526,25 +2933,44 @@ newSocket.on('proctoring-alert', (alertData) => {
         onToggle={() => setShowAlertsPanel(!showAlertsPanel)}
       />
 
-      {/* ✅ USE SYNCED TIMER INSTEAD OF LOCAL TIMER */}
-      <div className="quiz-progress">
-        <div className="progress-info">
-          <span className="progress-text">
-            Answered: {answeredCount} / {quiz.questions?.length || 0}
-          </span>
-          {timeLeft !== null && (
-            <span className="time-remaining">
-              Time Left: {formatTime(timeLeft)}
-            </span>
-          )}
-        </div>
-        <div className="progress-bar">
-          <div 
-            className="progress-fill"
-            style={{ width: `${progressPercentage}%` }}
-          ></div>
-        </div>
+     {/* ✅ TIMER DISPLAY WITH SYNC STATUS */}
+<div className="quiz-progress">
+  <div className="progress-info">
+    <span className="progress-text">
+      Answered: {answeredCount} / {quiz.questions?.length || 0}
+    </span>
+    
+    {timeLeft !== null ? (
+      <span className="time-remaining">
+        <span className="time-icon">⏱️</span>
+        {formatTime(timeLeft)}
+        {!isTimerRunning && <span className="timer-paused"> (Paused)</span>}
+      </span>
+    ) : (
+      <span className="time-syncing">
+        <div className="loading-spinner-small"></div>
+        Syncing timer with teacher...
+      </span>
+    )}
+  </div>
+  
+  <div className="progress-bar">
+    <div 
+      className="progress-fill"
+      style={{ width: `${progressPercentage}%` }}
+    ></div>
+    
+    {/* Time warning indicator */}
+    {timeLeft !== null && timeLeft < 300 && timeLeft > 0 && (
+      <div 
+        className="time-warning-indicator"
+        style={{ left: `${(1 - (timeLeft / (quiz.timeLimit * 60))) * 100}%` }}
+      >
+        ⚠️
       </div>
+    )}
+  </div>
+</div>
 
       <div className="quiz-content">
         <div className="quiz-questions">

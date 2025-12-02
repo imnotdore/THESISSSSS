@@ -371,7 +371,7 @@
 
 .student-name {
   font-weight: 500;
-  color: #e8eaed;
+  color: #3C4043;
   font-size: 0.85rem;
 }
 
@@ -1560,7 +1560,7 @@
 
 .dropdown-arrow {
   font-size: 9px;
-  color: #ccc;
+  color:black;
   transition: transform 0.3s;
 }
 
@@ -2039,4 +2039,145 @@
   background: rgba(0, 0, 0, 0.7);
   color: white;
   z-index: 5;
+}
+
+/* Timer Controls Panel */
+.timer-controls-panel {
+  position: fixed;
+  top: 100px;
+  right: 20px;
+  width: 350px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  z-index: 1000;
+  border: 2px solid #4A90E2;
+}
+
+.timer-controls-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  background: linear-gradient(135deg, #4A90E2, #357ABD);
+  color: white;
+  border-radius: 10px 10px 0 0;
+}
+
+.close-controls-btn {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.close-controls-btn:hover {
+  opacity: 1;
+}
+
+.timer-controls-content {
+  padding: 15px;
+}
+
+.timer-original-settings {
+  background: #f0f7ff;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border-left: 4px solid #4CAF50;
+  color: #333;
+}
+
+.original-timer-info {
+  font-size: 14px;
+  color: #000;
+}
+
+.original-timer-info p {
+  margin: 5px 0;
+}
+
+.time-adjust-buttons,
+.timer-control-buttons {
+  margin-bottom: 20px;
+}
+
+.time-buttons-grid,
+.control-buttons-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.time-btn,
+.control-btn {
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.time-btn {
+  background: #e3f2fd;
+  color: #1976D2;
+  border: 1px solid #bbdefb;
+}
+
+.time-btn:hover {
+  background: #bbdefb;
+  transform: translateY(-2px);
+}
+
+.control-btn {
+  background: #f5f5f5;
+  color: #333;
+  border: 1px solid #ddd;
+}
+
+.control-btn.pause {
+  background: #fff3e0;
+  color: #f57c00;
+  border-color: #ffcc80;
+}
+
+.control-btn.resume {
+  background: #e8f5e9;
+  color: #388e3c;
+  border-color: #a5d6a7;
+}
+
+.control-btn.edit {
+  background: #e3f2fd;
+  color: #1976D2;
+  border-color: #bbdefb;
+}
+
+.control-btn.reset {
+  background: #ffebee;
+  color: #d32f2f;
+  border-color: #ffcdd2;
+}
+
+.control-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.timer-info {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+  font-size: 14px;
+  color:#000;
+}
+
+.timer-info p {
+  margin: 5px 0;
 }

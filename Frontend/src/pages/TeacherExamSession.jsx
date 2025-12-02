@@ -225,89 +225,95 @@ const broadcastTimeUpdate = useCallback((newTime, runningState = null) => {
 }, [examId, isTimerRunning]);
 
 
- const handleEndExam = async () => {
+const handleEndExamSession = async () => {
+  // ✅ TRY BOTH SOURCES
+  const examIdFromState = exam?._id?.toString();
+  const examIdFromParams = examId; // from useParams()
+  
+  console.log('🔍 Exam IDs:', {
+    fromState: examIdFromState,
+    fromParams: examIdFromParams,
+    examState: exam
+  });
+  
+  const currentExamId = examIdFromState || examIdFromParams;
+  
+  if (!currentExamId) {
+    alert('Cannot end session: Exam ID not found. Please refresh the page.');
+    console.error('❌ Both exam ID sources are null:', {
+      examState: exam,
+      params: examId
+    });
+    return;
+  }
+  
+  console.log('🔍 Ending session with examId:', currentExamId);
+  
   try {
-    console.log('🛑 Ending exam session and disconnecting all students...');
+    const response = await api.post(`/exams/${currentExamId}/end-session`);
     
-    // BROADCAST EXAM END TO ALL STUDENTS
-    if (socketRef.current) {
-      socketRef.current.emit('exam-ended', {
-        roomId: `exam-${examId}`,
-        message: 'Exam has been ended by teacher',
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    // Disconnect all students
-    const connectedStudents = students.filter(student => student.socketId);
-    connectedStudents.forEach(student => {
+    if (response.data.success) {
+      console.log("✅ Session ended successfully");
+      
+      // ✅ Update exam state
+      const endedAt = new Date();
+      setExam(prev => ({
+        ...prev,
+        isActive: false,
+        endedAt: endedAt
+      }));
+      
+      // ✅ Notify socket
       if (socketRef.current) {
-        socketRef.current.emit('disconnect-student', {
-          studentSocketId: student.socketId,
-          reason: 'Exam ended by teacher',
-          examId: examId
+        socketRef.current.emit('broadcast-live-class-end', {
+          examId: currentExamId, // ✅ Use currentExamId, NOT examIdString
+          classId: exam?.classId?._id,
+          endedAt: endedAt.toISOString()
+        });
+
+        socketRef.current.emit('exam-ended', {
+          roomId: `exam-${currentExamId}`,
+          examId: currentExamId,
+          message: 'Live class has been ended by teacher',
+          endedAt: endedAt.toISOString(),
+          forcedExit: true
         });
       }
-    });
-    
-    cleanupAllConnections();
-    
-    // ✅ FIXED: Use direct API call instead of endExamSession
-    try {
-      const response = await api.post(`/exams/${examId}/end`);
       
-      if (response.data.success) {
-        setSessionStarted(false);
-        setIsTimerRunning(false);
-        setStudents([]);
-        setStudentStreams({});
-        setPeerConnections({});
-        setMessages([]);
-        setProctoringAlerts({});
-        setExpandedAlerts({});
-        
-        alert('✅ Exam ended! All students have been disconnected.');
-        
-        // ✅ REDIRECT TO DASHBOARD AFTER 2 SECONDS
-        setTimeout(() => {
-          navigate('/dashboard');
-        }, 2000);
+      // ✅ Clear timer caches
+      if (socketRef.current) {
+        socketRef.current.emit('clear-timer-cache', {
+          examId: currentExamId,
+          reason: 'session_ended'
+        });
       }
-    } catch (apiError) {
-      console.error('API Error ending exam:', apiError);
       
-      // ✅ FALLBACK: Even if API fails, still cleanup and redirect
-      setSessionStarted(false);
-      setIsTimerRunning(false);
+      localStorage.removeItem(`timer-${currentExamId}`);
+      localStorage.removeItem(`last-save-${currentExamId}`);
       
-      alert('✅ Exam session ended locally. Students have been disconnected.');
+      alert('✅ Exam session ended! Students cannot join anymore.');
       
-      // ✅ REDIRECT TO DASHBOARD
       setTimeout(() => {
         navigate('/dashboard');
       }, 2000);
     }
-    
   } catch (error) {
-    console.error('Failed to end exam:', error);
+    console.error('❌ Failed to end exam session:', error);
+    console.error('❌ Error details:', {
+      url: error.config?.url,
+      method: error.config?.method,
+      examId: currentExamId,
+      errorMessage: error.message
+    });
     
-    // ✅ EMERGENCY CLEANUP
-    setSessionStarted(false);
-    setIsTimerRunning(false);
-    cleanupAllConnections();
-    
-    alert('⚠️ Exam ended with minor issues. Redirecting to dashboard...');
-    
-    // ✅ REDIRECT TO DASHBOARD ANYWAY
-    setTimeout(() => {
-      navigate('/dashboard');
-    }, 2000);
+    alert('❌ Failed to end exam session. Please check console for details.');
   }
 };
 
 // ==================== TIMER CONTROL ====================
+// Sa timer effect, siguraduhing nagba-broadcast kapag nag-start
 useEffect(() => {
-  console.log('⏰ Timer effect running:', { isTimerRunning, timeLeft });
+  console.log('⏰ Teacher timer effect running:', { isTimerRunning, timeLeft });
   
   if (isTimerRunning && timeLeft > 0) {
     // Clear any existing interval first
@@ -324,20 +330,26 @@ useEffect(() => {
         if (newTime <= 0) {
           console.log('⏰ Time up! Auto-ending exam');
           clearInterval(timerRef.current);
-          handleEndExam();
+          handleEndExamSession(examId);
           return 0;
         }
         
-        // ✅ BROADCAST TIME EVERY SECOND FOR REAL-TIME SYNC
-        if (socketRef.current && socketRef.current.connected) {
-          socketRef.current.emit('exam-time-update', {
-            roomId: `exam-${examId}`,
-            timeLeft: newTime,
-            isTimerRunning: true,
-            timestamp: Date.now(),
-            teacherName: 'Teacher'
-          });
-        }
+       let lastBroadcastTime = 0;
+
+if (socketRef.current && socketRef.current.connected) {
+  const now = Date.now();
+  // ✅ THROTTLE BROADCASTS - Only send every 3 seconds
+  if (now - lastBroadcastTime > 3000) {
+    socketRef.current.emit('exam-time-update', {
+      roomId: `exam-${examId}`,
+      timeLeft: newTime,
+      isTimerRunning: true,
+      timestamp: now,
+      teacherName: 'Teacher'
+    });
+    lastBroadcastTime = now;
+  }
+}
         
         return newTime;
       });
@@ -358,7 +370,7 @@ useEffect(() => {
       timerRef.current = null;
     }
   };
-}, [isTimerRunning, timeLeft, examId, handleEndExam]);
+}, [isTimerRunning, timeLeft, examId, handleEndExamSession]);
 
 
 
@@ -367,55 +379,41 @@ const handleStartExam = async () => {
   try {
     console.log('🚀 Starting exam session...');
     
+    // ✅ USE THE CORRECT TIMER FROM STATE (not from exam data)
+    let initialTime = timeLeft;
+    
+    // If timer is 10 minutes (default), check if we should use exam timer
+    if (timeLeft === 600 || timeLeft === 10) {
+      if (exam?.timerSettings?.totalSeconds > 0) {
+        initialTime = exam.timerSettings.totalSeconds;
+        console.log("⏰ Using timer from quiz settings:", initialTime);
+      } else if (exam?.timeLimit > 0) {
+        initialTime = exam.timeLimit * 60;
+        console.log("⏰ Using timer from timeLimit:", initialTime);
+      }
+      setTimeLeft(initialTime); // Update state
+    }
+    
+    console.log("✅ Starting with timer:", initialTime, "seconds (", formatTime(initialTime), ")");
+    
     const response = await startExamSession(examId);
     if (response.success) {
       setSessionStarted(true);
       setIsTimerRunning(true);
-      console.log('✅ Exam session started successfully');
       
-      // BROADCAST EXAM START TO ALL STUDENTS
+      // ✅ BROADCAST CORRECT TIMER
       if (socketRef.current) {
-        console.log('📢 Broadcasting exam start to students...');
-        
-        const startData = {
+        socketRef.current.emit('exam-time-update', {
           roomId: `exam-${examId}`,
-          examId: examId,
-          examTitle: exam?.title || 'Exam',
-          timestamp: new Date().toISOString(),
-          requiresCamera: true,
-          requiresMicrophone: true
-        };
+          timeLeft: initialTime,
+          isTimerRunning: true,
+          timestamp: Date.now(),
+          teacherName: 'Teacher'
+        });
         
-        console.log('🎯 Sending exam-started event:', startData);
-        
-        socketRef.current.emit('exam-started', startData);
-        
-        // ✅ BROADCAST INITIAL TIME IMMEDIATELY
-        setTimeout(() => {
-          socketRef.current.emit('exam-time-update', {
-            roomId: `exam-${examId}`,
-            timeLeft: timeLeft,
-            isTimerRunning: true,
-            timestamp: Date.now(),
-            teacherName: 'Teacher'
-          });
-          console.log('🕒 Initial time broadcasted:', formatTime(timeLeft));
-        }, 500);
+        console.log('✅ Exam started with timer:', formatTime(initialTime));
+        alert(`✅ Exam started! Timer: ${formatTime(initialTime)}`);
       }
-      
-      // Request cameras for connected students
-      const connectedStudents = students.filter(student => student.socketId);
-      console.log(`📹 Requesting cameras from ${connectedStudents.length} connected students`);
-      
-      connectedStudents.forEach((student, index) => {
-        setTimeout(() => {
-          requestStudentCamera(student.socketId);
-        }, 1000 + (index * 1000));
-      });
-      
-      alert('✅ Exam started! Students can now see the quiz.');
-    } else {
-      alert('❌ Failed to start exam session');
     }
   } catch (error) {
     console.error('Failed to start exam:', error);
@@ -458,28 +456,58 @@ const applyCustomTime = () => {
 };
 
 const addTime = (minutes) => {
+  // If timer is 10 minutes (default), check if we should use exam's original timer
+  let currentTime = timeLeft;
+  
+  if (timeLeft === 600 || timeLeft === 10) {
+    // Try to get original timer from exam
+    if (exam?.timerSettings?.totalSeconds > 0) {
+      currentTime = exam.timerSettings.totalSeconds;
+      console.log("🔄 Switching from default 10min to original timer:", currentTime);
+      setTimeLeft(currentTime);
+    }
+  }
+  
   const additionalSeconds = minutes * 60;
-  const newTime = timeLeft + additionalSeconds;
+  const newTime = currentTime + additionalSeconds;
   
   console.log('➕ Adding time:', {
-    minutes: minutes,
-    additionalSeconds: additionalSeconds,
-    currentTime: timeLeft,
+    currentTime: currentTime,
+    additionalMinutes: minutes,
     newTime: newTime,
     formatted: formatTime(newTime)
   });
 
   setTimeLeft(newTime);
   
-  // ✅ BROADCAST UPDATED TIME IMMEDIATELY
+  // ✅ CRITICAL: Update the room state immediately
   if (socketRef.current) {
+    // Update room state
+    if (examRooms.has(`exam-${examId}`)) {
+      const room = examRooms.get(`exam-${examId}`);
+      room.timeLeft = newTime;
+    }
+    
+    // ✅ BROADCAST UPDATED TIME WITH FORCE FLAG
     socketRef.current.emit('exam-time-update', {
       roomId: `exam-${examId}`,
       timeLeft: newTime,
       isTimerRunning: isTimerRunning,
       timestamp: Date.now(),
-      teacherName: 'Teacher'
+      teacherName: 'Teacher',
+      action: 'add_time', // Add action type
+      additionalMinutes: minutes
     });
+    
+    // ✅ ALSO SEND DIRECT TIME SYNC REQUEST
+    setTimeout(() => {
+      socketRef.current.emit('force-timer-sync', {
+        roomId: `exam-${examId}`,
+        timeLeft: newTime,
+        isTimerRunning: isTimerRunning,
+        forceUpdate: true
+      });
+    }, 100);
   }
   
   alert(`✅ Added ${minutes} minutes. New time: ${formatTime(newTime)}`);
@@ -490,21 +518,18 @@ const pauseTimer = () => {
   setIsTimerRunning(false);
   setShowTimerControls(false);
   
+  // ✅ SEND TO SERVER FOR PERSISTENCE
+  if (socketRef.current) {
+    socketRef.current.emit('pause-exam-timer', {
+      roomId: `exam-${examId}`,
+      examId: examId
+    });
+  }
+  
   // Clear the interval immediately
   if (timerRef.current) {
     clearInterval(timerRef.current);
     timerRef.current = null;
-  }
-  
-  // ✅ BROADCAST PAUSE STATE IMMEDIATELY
-  if (socketRef.current) {
-    socketRef.current.emit('exam-time-update', {
-      roomId: `exam-${examId}`,
-      timeLeft: timeLeft,
-      isTimerRunning: false,
-      timestamp: Date.now(),
-      teacherName: 'Teacher'
-    });
   }
 };
 
@@ -512,7 +537,14 @@ const resumeTimer = () => {
   console.log('▶️ Teacher resuming timer');
   setIsTimerRunning(true);
   setShowTimerControls(false);
-  // The useEffect will automatically start the interval again
+  
+  // ✅ SEND TO SERVER FOR PERSISTENCE
+  if (socketRef.current) {
+    socketRef.current.emit('resume-exam-timer', {
+      roomId: `exam-${examId}`,
+      examId: examId
+    });
+  }
 
   
   // ✅ BROADCAST RESUME STATE IMMEDIATELY
@@ -527,12 +559,15 @@ const resumeTimer = () => {
   }
 };
 
-const resetTimer = () => {
+const resetTimer = (customOriginalTime = null) => {
   if (!window.confirm('Are you sure you want to reset the timer to the original exam duration?')) {
     return;
   }
   
-  const originalTime = 10;
+  const originalTime = customOriginalTime || 
+                      (exam?.timerSettings?.totalSeconds || 
+                       (exam?.timeLimit ? exam.timeLimit * 60 : 600));
+  
   console.log('🔄 Resetting timer to original:', {
     originalTime: originalTime,
     formatted: formatTime(originalTime)
@@ -833,41 +868,84 @@ useEffect(() => {
 }, [handleProctoringAlert]); // ✅ Now this is safe
 
   // ==================== EXAM SESSION MANAGEMENT ====================
-  useEffect(() => {
-    const loadExamData = async () => {
-      try {
-        setLoading(true);
-        
-        const token = localStorage.getItem('token');
-        if (!token) {
-          navigate('/login');
-          return;
-        }
-        
-        const examResponse = await api.get(`/exams/${examId}/details`);
-        
-        if (examResponse.success) {
-          setExam(examResponse.data);
-          const initialTime = 10;
-          setTimeLeft(initialTime);
-          setSessionStarted(examResponse.data.isActive || false);
-          
-          console.log('📊 Exam loaded with time:', {
-            timeLimit: examResponse.data.timeLimit,
-            initialTime: initialTime,
-            formatted: formatTime(initialTime)
-          });
-        }
-        
-      } catch (error) {
-        console.error('❌ Failed to load exam data:', error);
-      } finally {
-        setLoading(false);
+// ==================== EXAM SESSION MANAGEMENT ====================
+useEffect(() => {
+  const loadExamData = async () => {
+    try {
+      setLoading(true);
+      
+      const token = localStorage.getItem('token');
+      if (!token) {
+        navigate('/login');
+        return;
       }
-    };
+      
+      const examResponse = await api.get(`/exams/${examId}/details`);
+      
+      if (examResponse.success) {
+        const examData = examResponse.data;
+        setExam(examData);
+        
+        // ✅ FIXED: PRIORITIZE TIMER SETTINGS FROM DATABASE
+        let initialTime;
+        
+        // 1. First check timerSettings from quiz creation
+        if (examData.timerSettings && examData.timerSettings.totalSeconds > 0) {
+          initialTime = examData.timerSettings.totalSeconds;
+          console.log("⏰ Timer from quiz settings:", {
+            hours: examData.timerSettings.hours,
+            minutes: examData.timerSettings.minutes,
+            seconds: examData.timerSettings.seconds,
+            totalSeconds: examData.timerSettings.totalSeconds
+          });
+        } 
+        // 2. Check timeLimit (in minutes)
+        else if (examData.timeLimit && examData.timeLimit > 0) {
+          initialTime = examData.timeLimit * 60;
+          console.log("⏰ Timer from timeLimit:", examData.timeLimit, "minutes ->", initialTime, "seconds");
+        }
+        // 3. Check if it's a live class (no timer)
+        else if (examData.examType === 'live-class' || examData.isLiveClass) {
+          initialTime = 0; // No timer for live class
+          console.log("🎥 Live class - no timer needed");
+        }
+        // 4. Default fallback (SHOULD NOT HAPPEN if quiz was created properly)
+        else {
+          initialTime = 600; // 10 minutes
+          console.log("⚠️ Using default timer: 10 minutes - NO TIMER SETTINGS FOUND!");
+          
+          // Try to get timer from URL or localStorage as backup
+          const urlParams = new URLSearchParams(window.location.search);
+          const urlTimer = urlParams.get('timer');
+          if (urlTimer) {
+            initialTime = parseInt(urlTimer);
+            console.log("⏰ Using timer from URL:", initialTime);
+          }
+        }
+        
+        setTimeLeft(initialTime);
+        setSessionStarted(examData.isActive || false);
+        
+        console.log('📊 Exam loaded with FINAL timer:', {
+          examTitle: examData.title,
+          examType: examData.examType,
+          isLiveClass: examData.isLiveClass,
+          timerSettings: examData.timerSettings,
+          timeLimit: examData.timeLimit,
+          initialTime: initialTime,
+          formatted: formatTime(initialTime)
+        });
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to load exam data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    loadExamData();
-  }, [examId, navigate]);
+  loadExamData();
+}, [examId, navigate]);
   // ==================== WEBRTC HANDLERS ====================
   const handleWebRTCOffer = async (data) => {
     console.log('🎯 Received WebRTC offer from:', data.from);
@@ -1225,57 +1303,99 @@ useEffect(() => {
   const connectedStudents = students.filter(student => student.socketId && student.isConnected);
 
   // Timer Controls Component
-  const renderTimerControls = () => {
-    if (!showTimerControls) return null;
+const renderTimerControls = () => {
+  if (!showTimerControls) return null;
 
-    return (
-      <div className="timer-controls-panel">
-        <div className="timer-controls-header">
-          <h4>⏰ Timer Controls</h4>
-          <button className="close-controls-btn" onClick={toggleTimerControls}>✕</button>
+  // Get original timer from exam
+  const originalTime = exam?.timerSettings?.totalSeconds || 
+                      (exam?.timeLimit ? exam.timeLimit * 60 : 600);
+
+  return (
+    <div className="timer-controls-panel">
+      <div className="timer-controls-header">
+        <h4>⏰ Timer Controls</h4>
+        <button className="close-controls-btn" onClick={toggleTimerControls}>✕</button>
+      </div>
+      
+      <div className="timer-controls-content">
+        {/* ✅ SHOW ORIGINAL TIMER FROM QUIZ SETUP */}
+        <div className="timer-original-settings">
+          <h5>📝 Original Timer Settings</h5>
+          <div className="original-timer-info">
+            <p><strong>Type:</strong> {exam?.examType === 'asynchronous' ? '⏱️ Asynchronous' : '🎥 Live Class'}</p>
+            <p><strong>Original Time:</strong> {formatTime(originalTime)}</p>
+            {exam?.timerSettings && (
+              <p><strong>Breakdown:</strong> {exam.timerSettings.hours}h {exam.timerSettings.minutes}m {exam.timerSettings.seconds}s</p>
+            )}
+          </div>
         </div>
-        
-        <div className="timer-controls-content">
-          <div className="time-adjust-buttons">
-            <h5>➕ Add Time</h5>
-            <div className="time-buttons-grid">
-              <button className="time-btn" onClick={() => addTime(5)}>+5 min</button>
-              <button className="time-btn" onClick={() => addTime(10)}>+10 min</button>
-              <button className="time-btn" onClick={() => addTime(15)}>+15 min</button>
-              <button className="time-btn" onClick={() => addTime(30)}>+30 min</button>
-            </div>
-          </div>
 
-          <div className="timer-control-buttons">
-            <h5>⏱️ Timer Controls</h5>
-            <div className="control-buttons-grid">
-              {isTimerRunning ? (
-                <button className="control-btn pause" onClick={pauseTimer}>
-                  ⏸️ Pause Timer
-                </button>
-              ) : (
-                <button className="control-btn resume" onClick={resumeTimer}>
-                  ▶️ Resume Timer
-                </button>
-              )}
-              <button className="control-btn edit" onClick={startTimerEdit}>
-                ⚙️ Set Custom Time
-              </button>
-              <button className="control-btn reset" onClick={resetTimer}>
-                🔄 Reset to Original
-              </button>
-            </div>
+        <div className="time-adjust-buttons">
+          <h5>➕ Add Time</h5>
+          <div className="time-buttons-grid">
+            <button className="time-btn" onClick={() => addTime(5)}>+5 min</button>
+            <button className="time-btn" onClick={() => addTime(10)}>+10 min</button>
+            <button className="time-btn" onClick={() => addTime(15)}>+15 min</button>
+            <button className="time-btn" onClick={() => addTime(30)}>+30 min</button>
           </div>
-          
-          <div className="timer-info">
-            <p><strong>Current Time:</strong> {formatTime(timeLeft)}</p>
-            <p><strong>Status:</strong> {isTimerRunning ? 'Running' : 'Paused'}</p>
-            <p><strong>Students:</strong> Will see EXACTLY this time</p>
+        </div>
+
+        <div className="timer-control-buttons">
+          <h5>⏱️ Timer Controls</h5>
+          <div className="control-buttons-grid">
+            {isTimerRunning ? (
+              <button className="control-btn pause" onClick={pauseTimer}>
+                ⏸️ Pause Timer
+              </button>
+            ) : (
+              <button className="control-btn resume" onClick={resumeTimer}>
+                ▶️ Resume Timer
+              </button>
+            )}
+            <button className="control-btn edit" onClick={startTimerEdit}>
+              ⚙️ Set Custom Time
+            </button>
+            <button className="control-btn reset" onClick={() => resetTimer(originalTime)}>
+              🔄 Reset to Original
+            </button>
           </div>
+        </div>
+        // In renderTimerControls function, add a live preview:
+<div className="timer-live-preview">
+  <h5>🕒 Current Timer State</h5>
+  <div className="timer-state-info">
+    <p><strong>Time:</strong> {formatTime(timeLeft)}</p>
+    <p><strong>Status:</strong> {isTimerRunning ? 'Running ▶️' : 'Paused ⏸️'}</p>
+    <p><strong>Connected Students:</strong> {connectedStudents.length}</p>
+    <button 
+      className="sync-now-btn"
+      onClick={() => {
+        // Force sync all students
+        if (socketRef.current) {
+          socketRef.current.emit('force-timer-sync', {
+            roomId: `exam-${examId}`,
+            timeLeft: timeLeft,
+            isTimerRunning: isTimerRunning,
+            forceUpdate: true
+          });
+          alert('🔄 Syncing timer with all students...');
+        }
+      }}
+    >
+      🔄 Sync Now with All Students
+    </button>
+  </div>
+</div>
+
+        <div className="timer-info">
+          <p><strong>Current Time:</strong> {formatTime(timeLeft)}</p>
+          <p><strong>Status:</strong> {isTimerRunning ? 'Running' : 'Paused'}</p>
+          <p><strong>Students:</strong> Will see EXACTLY this time</p>
         </div>
       </div>
-    );
-  };
+    </div>
+  );
+};
 
   // Timer Edit Modal
   const renderTimerEditModal = () => {
@@ -1724,7 +1844,7 @@ const renderProctoringAlerts = (student) => {
               🚀 Start Exam
             </button>
           ) : (
-            <button className="end-exam-btn" onClick={handleEndExam}>
+            <button className="end-exam-btn" onClick={handleEndExamSession}>
               ⏹️ End Exam
             </button>
           )}
