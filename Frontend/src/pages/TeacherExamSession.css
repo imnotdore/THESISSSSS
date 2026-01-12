@@ -331,33 +331,24 @@
 
 .video-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
-  padding: 8px 0;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 20px;
+  padding: 10px 20px;
   flex: 1;
   overflow-y: auto;
 }
 
-.student-video-card {
-  background: #1a1d21;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid #3c4043;
-  transition: all 0.2s ease;
-}
+
 
 .student-video-card:hover {
   border-color: #5f6368;
   transform: translateY(-1px);
 }
 
-.video-header {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.8rem;
-  background: #2d3035;
-  border-bottom: 1px solid #3c4043;
+.video-header .student-name {
+  font-weight: 500;
+  color: #e8eaed !important; /* CHANGED FROM #3C4043 TO #e8eaed */
+  font-size: 0.85rem;
 }
 
 .student-badge {
@@ -386,7 +377,8 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  background: #000;
+  background: #000 !important;
+  display: block; /* IMPORTANT */
 }
 
 .video-footer {
@@ -1823,15 +1815,21 @@
   position: relative;
   width: 100%;
   height: 160px;
-  background: #000;
-  flex-shrink: 0;
+  background: #000 !important;
+  overflow: hidden;
 }
 
 .student-video {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  background: #000;
+  background: #000 !important;
+}
+
+.empty-state h4 {
+  margin: 0 0 0.8rem 0;
+  color: #e8eaed !important; /* CHANGED FROM #000000b0 */
+  font-size: 1.2rem;
 }
 
 /* RESPONSIVE DESIGN FOR VIDEO FOOTER */
@@ -2234,13 +2232,33 @@
 }
 
 .timer-modal-content {
-  background: white;
+  background: rgb(37, 37, 37);
   border-radius: 12px;
   padding: 20px;
   width: 400px;
   max-width: 90%;
 }
 
+.timer-preview {
+  font-size: 1.5rem;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 20px;
+  color: #131313;
+  position: relative;
+}
+
+.close-timer-modal-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.2rem;
+  position: absolute;
+  top: 15px;
+  right: 20px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
 .timer-section {
   display: flex;
   align-items: center;
@@ -2274,4 +2292,250 @@
   padding: 6px 12px;
   border-radius: 20px;
   cursor: pointer;
+}
+
+.refresh-cameras-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 14px;
+  margin-left: 10px;
+  transition: all 0.3s ease;
+}
+
+.refresh-cameras-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.refresh-cameras-btn:active {
+  transform: translateY(0);
+}
+
+/* VIDEO FALLBACK STYLES */
+.video-fallback {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #1a1d21;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #9aa0a6;
+  gap: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+.fallback-icon {
+  font-size: 2.5rem;
+  opacity: 0.5;
+}
+
+.fallback-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fallback-text p {
+  margin: 0;
+  font-weight: 500;
+  color: #e8eaed;
+}
+
+.fallback-text small {
+  font-size: 0.7rem;
+  opacity: 0.8;
+}
+
+/* VIDEO STATUS INDICATOR */
+.video-status-indicator {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #4CAF50;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 10;
+}
+
+.video-status-indicator .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4CAF50;
+  animation: pulse 2s infinite;
+}
+
+/* STREAM DEBUG INFO */
+.stream-debug {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-family: 'Courier New', monospace;
+  z-index: 10;
+}
+
+/* VIDEO LOADING ANIMATION */
+@keyframes videoLoading {
+  0% { opacity: 0.3; }
+  50% { opacity: 0.7; }
+  100% { opacity: 0.3; }
+}
+
+.video-loading {
+  animation: videoLoading 1.5s infinite;
+}
+
+/* CRITICAL: Video container styles */
+.video-container {
+  position: relative;
+  width: 100%;
+  height: 200px; /* Fixed height */
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.student-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+  display: block;
+}
+
+/* Ensure video element is visible */
+.student-video:not([src]):not([srcObject]) {
+  display: none;
+}
+
+/* Video status overlay */
+.video-status-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 5;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot.live {
+  background: #4CAF50;
+  animation: pulse 2s infinite;
+}
+
+.status-dot.offline {
+  background: #FF5722;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Fallback overlay */
+.video-fallback-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #1a1a2e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  z-index: 2;
+}
+
+.fallback-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #4CAF50;
+  animation: spin 1s ease-in-out infinite;
+  margin-bottom: 15px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.retry-btn {
+  margin-top: 10px;
+  padding: 8px 16px;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.retry-btn:hover {
+  background: #45a049;
+}
+
+/* Manual play button */
+.play-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.play-manual-btn {
+  padding: 12px 24px;
+  background: #FF5722;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.play-manual-btn:hover {
+  background: #ff7043;
+  transform: scale(1.05);
 }

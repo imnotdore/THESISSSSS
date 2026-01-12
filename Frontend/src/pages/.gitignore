@@ -1,0 +1,61 @@
+# =====================
+# ENV FILES (IMPORTANT)
+# =====================
+backend/.env
+Frontend/.env
+.env
+.env.*
+
+# =====================
+# NODE / VITE
+# =====================
+backend/node_modules/
+Frontend/node_modules/
+
+backend/dist/
+Frontend/dist/
+Frontend/build/
+
+# Vite cache
+**/.vite/
+
+# =====================
+# UPLOADS (AUTO-GENERATED FILES)
+# =====================
+backend/src/uploads/
+backend/uploads/
+
+# =====================
+# LOGS
+# =====================
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# =====================
+# PYTHON
+# =====================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.env/
+
+# =====================
+# ML / MODEL FILES
+# =====================
+*.pt
+*.onnx
+
+# =====================
+# OS FILES
+# =====================
+.DS_Store
+Thumbs.db
+
+# =====================
+# EDITOR
+# =====================
+.vscode/
+.idea/

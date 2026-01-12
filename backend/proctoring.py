@@ -63,13 +63,29 @@ app_socket = socketio.WSGIApp(sio, app)
 def log_violation_to_backend(exam_id, student_socket_id, violation_data):
     """Log violation details to Node.js backend MongoDB"""
     try:
-        print(f"📝 Logging violation to backend for student {student_socket_id}")
+        print(f"📝 Logging violation to backend for socket {student_socket_id}")
+        
+        # ✅ KUNIN ANG ACTUAL STUDENT ID MULA SA CONNECTED CLIENTS
+        client_info = connected_clients.get(student_socket_id)
+        if not client_info:
+            print(f"❌ Student socket {student_socket_id} not in connected_clients")
+            return
+        
+        # ✅ GAMITIN ANG ACTUAL STUDENT ID (MULA SA SOCKET AUTH)
+        # I-assume na sa socket connection, na-store ang userId
+        student_id = client_info.get('user_id') or client_info.get('userId')
+        if not student_id:
+            print(f"❌ No student ID found for socket {student_socket_id}")
+            return
+        
+        print(f"✅ Found student ID: {student_id} for socket {student_socket_id}")
         
         backend_url = "http://localhost:3000/api/exams/log-violation"
         
         payload = {
             "examId": exam_id,
-            "studentSocketId": student_socket_id,
+            "studentId": student_id,  # ✅ GAMITIN ANG ACTUAL STUDENT ID
+            "studentSocketId": student_socket_id,  # ✅ ISAMA PA RIN ANG SOCKET ID PARA SA REFERENCE
             "violationType": violation_data.get("detectionType", "unknown"),
             "message": violation_data.get("message", ""),
             "severity": violation_data.get("severity", "medium"),
@@ -83,6 +99,8 @@ def log_violation_to_backend(exam_id, student_socket_id, violation_data):
         
         if response.status_code == 200:
             print(f"✅ Violation logged to MongoDB: {violation_data.get('detectionType')}")
+            result = response.json()
+            print(f"📊 Attempts: {result.get('data', {}).get('attempts', {})}")
         else:
             print(f"⚠️ Failed to log violation: {response.status_code}")
             
@@ -125,27 +143,44 @@ connected_clients = {}
 audio_data_buffer = deque(maxlen=100)
 detection_history = deque(maxlen=50)  # Track detection history for better accuracy
 
+
 @sio.event
 def connect(sid, environ):
     print(f"✅ Client connected: {sid}")
-    connected_clients[sid] = {
-        'connected_at': datetime.now(),
-        'user_role': None,
-        'exam_id': None,
-        'audio_alerts': 0,
-        'screenshot_alerts': 0,
-        'last_audio_alert': None,
-        'last_screenshot_alert': None,
-        'detection_stats': {
-            'face_detected_count': 0,
-            'total_frames': 0,
-            'recent_gaze': [],
-            'recent_head_pose': [],
-            'screenshot_attempts': 0,
-            'tab_switches': 0
-        },
-        'detection_settings': {}
-    }
+    
+    # ✅ KUNIN ANG USER INFO MULA SA SOCKET AUTH
+    try:
+        auth = environ.get('HTTP_AUTHORIZATION', '')
+        if auth.startswith('Bearer '):
+            token = auth[7:]
+            # Decode JWT token para makuha ang user info
+            import jwt
+            decoded = jwt.decode(token, options={"verify_signature": False})
+            user_id = decoded.get('id')
+            user_role = decoded.get('role')
+            
+            connected_clients[sid] = {
+                'connected_at': datetime.now(),
+                'user_id': user_id,  # ✅ STORE ACTUAL USER ID
+                'user_role': user_role,
+                'exam_id': None,
+                'audio_alerts': 0,
+                'screenshot_alerts': 0,
+                'last_audio_alert': None,
+                'last_screenshot_alert': None,
+                'detection_stats': {
+                    'face_detected_count': 0,
+                    'total_frames': 0,
+                    'recent_gaze': [],
+                    'recent_head_pose': [],
+                    'screenshot_attempts': 0,
+                    'tab_switches': 0
+                },
+                'detection_settings': {}
+            }
+            print(f"✅ User authenticated: {user_id} ({user_role})")
+    except Exception as e:
+        print(f"⚠️ Could not authenticate user: {e}")
 
 @sio.event
 def manual_violation(sid, data):
@@ -386,37 +421,11 @@ def send_proctoring_alert(exam_id, alert_data):
                 'violation_history': []
             })
             
-            # ✅ DEDUCT ATTEMPTS FOR ALL VIOLATION TYPES
-            should_deduct = True  # Always deduct for any violation
-
-            # Get detection type    
-            detection_type = alert_data.get('detectionType', 'unknown')
-
-            # Determine severity level
-            major_violations = [
-                'tab_switching',
-                'multiple_people', 
-                'no_face_detected', 
-                'multiple_screen_indicators',
-                'speaking_detected',
-                'loud_noise_detected',
-                'low_attention_score'
-            ]
-
-            minor_violations = [
-                'gaze_deviation', 'head_pose_deviation', 'mouth_movement',
-                'mouse_usage', 'suspicious_gesture', 'audio_detection'
-            ]
-
-            if detection_type in major_violations:
-                severity_multiplier = 1.0  # Full attempt for major violations
-            elif detection_type in minor_violations:
-                severity_multiplier = 0.5  # Half attempt for minor violations
-            else:
-                severity_multiplier = 0.5  # Default to half attempt
+            # ✅ ALWAYS DEDUCT ATTEMPTS FOR VIOLATIONS
+            should_deduct = True
             
             if should_deduct:
-                attempts['current_attempts'] += severity_multiplier
+                attempts['current_attempts'] += 1  # ⬅️ DITO NAGDEDUCT NG ATTEMPTS
                 attempts['attempts_left'] = max(0, attempts['max_attempts'] - attempts['current_attempts'])
                 
                 # Add to violation history
@@ -424,10 +433,8 @@ def send_proctoring_alert(exam_id, alert_data):
                     'timestamp': datetime.now().isoformat(),
                     'type': detection_type,
                     'message': alert_data.get('message', ''),
-                    'severity': alert_data.get('severity', 'medium'),
                     'attempts_used': attempts['current_attempts'],
-                    'attempts_left': attempts['attempts_left'],
-                    'deducted': severity_multiplier
+                    'attempts_left': attempts['attempts_left']
                 })
                 
                 # Keep only last 50 violations
@@ -436,33 +443,24 @@ def send_proctoring_alert(exam_id, alert_data):
                 
                 student_attempts[key] = attempts
                 
-                # Add attempts info to alert
+                # ✅ CRITICAL: Include attempts info in alert
                 alert_data['attemptsInfo'] = {
                     'currentAttempts': attempts['current_attempts'],
                     'maxAttempts': attempts['max_attempts'],
                     'attemptsLeft': attempts['attempts_left'],
-                    'violationCount': len(attempts['violation_history']),
-                    'deductedThisTime': severity_multiplier
+                    'violationCount': len(attempts['violation_history'])
                 }
             
             # Check if attempts exhausted
             if attempts['attempts_left'] <= 0:
                 # Send disconnect command to student
-                disconnect_reason = f"Attempts exhausted ({attempts['current_attempts']:.1f}/{attempts['max_attempts']} violations)"
+                disconnect_reason = f"Attempts exhausted ({attempts['current_attempts']}/{attempts['max_attempts']} violations)"
                 
                 sio.emit('teacher-disconnect', {
                     'reason': disconnect_reason,
                     'examId': exam_id
                 }, room=student_socket_id)
                 
-                # Also send disconnect to teacher
-                sio.emit('student-disconnected', {
-                    'studentSocketId': student_socket_id,
-                    'reason': disconnect_reason,
-                    'examId': exam_id,
-                    'attemptsUsed': attempts['current_attempts']
-                }, room=room)
-        
         sio.emit('proctoring-alert', alert_data, room=room)
         print(f"🚨 Sent proctoring alert to exam {exam_id}: {alert_data}")
         
@@ -1279,7 +1277,7 @@ def process_audio():
                         "type": alert_type,
                         "severity": "high" if audio_status == "speaking" else "medium",
                         "timestamp": current_time.isoformat(),
-                        "studentSocketId": student_id,
+                        "studentSocketId": student_socket_id,
                         "detectionType": "speaking_detected" if audio_status == "speaking" else "audio_detection",
                         "confidence": confidence
                     })

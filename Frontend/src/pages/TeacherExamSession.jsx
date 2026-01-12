@@ -11,6 +11,7 @@ export default function TeacherExamSession() {
   const navigate = useNavigate();
   
   // State Management
+  
   const [exam, setExam] = useState(null);
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -686,110 +687,130 @@ export default function TeacherExamSession() {
   }, [examId, navigate]);
 
   // ==================== WEBRTC HANDLERS ====================
-  const handleWebRTCOffer = async (data) => {
-    console.log('🎯 Received WebRTC offer from:', data.from);
+// PALITAN ang existing na handleWebRTCOffer function SA TeacherExamSession.jsx
+const playAttempts = useRef({});
+
+
+const handleWebRTCOffer = async (data) => {
+  console.log('🎯 Received WebRTC offer from student:', data.from);
+  
+  // Clean up existing connection
+  if (peerConnections[data.from]) {
+    cleanupStudentConnection(data.from);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  try {
+    const peerConnection = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ],
+      iceCandidatePoolSize: 10
+    });
     
-    if (peerConnections[data.from]) {
-      cleanupStudentConnection(data.from);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    try {
-      const peerConnection = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' }
-        ]
-      });
-
-      let streamReceived = false;
-      
-      peerConnection.ontrack = (event) => {
-        console.log('📹 ontrack event fired for:', data.from);
-        
-        if (event.streams && event.streams.length > 0 && !streamReceived) {
-          streamReceived = true;
-          const stream = event.streams[0];
-          
-          console.log('🎬 Stream received with tracks:', {
-            videoTracks: stream.getVideoTracks().length,
-            audioTracks: stream.getAudioTracks().length,
-            streamActive: stream.active
-          });
-
-          setStudentStreams(prev => ({
-            ...prev,
-            [data.from]: stream
-          }));
-
-          setStudents(prev => prev.map(student => 
-            student.socketId === data.from 
-              ? { ...student, cameraEnabled: true }
-              : student
-          ));
-
-          setTimeout(() => {
-            const videoElement = videoRefs.current[data.from];
-            if (videoElement && stream.active) {
-              console.log('🎬 Setting up video for:', data.from);
-              
-              videoElement.srcObject = null;
-              videoElement.srcObject = stream;
-              videoElement.muted = true;
-              videoElement.playsInline = true;
-              
-              const forcePlay = async (attempt = 0) => {
-                try {
-                  await videoElement.play();
-                  console.log('✅ Video playing successfully!');
-                } catch (error) {
-                  console.log(`⚠️ Play attempt ${attempt + 1} failed:`, error.name);
-                  if (attempt < 10) {
-                    setTimeout(() => forcePlay(attempt + 1), 200);
-                  }
-                }
-              };
-              
-              forcePlay();
-            }
-          }, 100);
-        }
-      };
-
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current) {
-          socketRef.current.emit('ice-candidate', {
-            target: data.from,
-            candidate: event.candidate
-          });
-        }
-      };
-
-      setPeerConnections(prev => ({
-        ...prev,
-        [data.from]: peerConnection
-      }));
-
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-      console.log('✅ Remote description set');
-      
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      console.log('✅ Answer created');
-
-      if (socketRef.current) {
-        socketRef.current.emit('webrtc-answer', {
+    // Store peer connection
+    setPeerConnections(prev => ({
+      ...prev,
+      [data.from]: peerConnection
+    }));
+    
+    // CRITICAL FIX: Handle track event properly
+  // Line ~1000: Replace the ontrack handler
+peerConnection.ontrack = (event) => {
+  console.log('📹 TRACK EVENT RECEIVED:', {
+    studentId: data.from,
+    streams: event.streams.length,
+    trackKind: event.track.kind,
+    trackId: event.track.id
+  });
+  
+  if (event.streams && event.streams.length > 0) {
+    // CRITICAL: Create NEW MediaStream object
+    const mediaStream = new MediaStream();
+    event.streams[0].getTracks().forEach(track => {
+      mediaStream.addTrack(track);
+      console.log('✅ Added track:', track.kind, track.id);
+    });
+    
+    // Store IMMEDIATELY
+    setStudentStreams(prev => ({
+      ...prev,
+      [data.from]: mediaStream
+    }));
+    
+    // Setup video immediately
+    setTimeout(() => {
+      setupVideoElement(data.from, mediaStream);
+    }, 100);
+  }
+};
+    
+    // Handle ICE candidates
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate && socketRef.current) {
+        socketRef.current.emit('ice-candidate', {
           target: data.from,
-          answer: answer
+          candidate: event.candidate
         });
-        console.log('✅ Sent WebRTC answer to student');
       }
-
-    } catch (error) {
-      console.error('❌ Error handling WebRTC offer:', error);
-      cleanupStudentConnection(data.from);
+    };
+    
+    peerConnection.oniceconnectionstatechange = () => {
+      console.log(`🧊 ICE state for ${data.from}:`, peerConnection.iceConnectionState);
+      
+      if (peerConnection.iceConnectionState === 'connected' || 
+          peerConnection.iceConnectionState === 'completed') {
+        console.log('✅ WebRTC connection established with:', data.from);
+      }
+      
+      if (peerConnection.iceConnectionState === 'failed') {
+        console.log('❌ WebRTC connection failed, retrying...');
+        cleanupStudentConnection(data.from);
+        setTimeout(() => requestStudentCamera(data.from), 2000);
+      }
+    };
+    
+    // Handle connection state
+    peerConnection.onconnectionstatechange = () => {
+      console.log(`🔗 Connection state for ${data.from}:`, peerConnection.connectionState);
+    };
+    
+    // Set remote description
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+    console.log('✅ Remote description set');
+    
+    // Create and send answer
+    const answer = await peerConnection.createAnswer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: true
+    });
+    
+    await peerConnection.setLocalDescription(answer);
+    
+    if (socketRef.current) {
+      socketRef.current.emit('webrtc-answer', {
+        target: data.from,
+        answer: answer
+      });
+      console.log('✅ WebRTC answer sent to student');
     }
-  };
-
+    
+  } catch (error) {
+    console.error('❌ Error handling WebRTC offer:', error);
+    
+    // Cleanup and retry
+    cleanupStudentConnection(data.from);
+    
+    // Request camera again after delay
+    setTimeout(() => {
+      if (socketRef.current) {
+        requestStudentCamera(data.from);
+      }
+    }, 3000);
+  }
+};
   const handleICECandidate = async (data) => {
     const peerConnection = peerConnections[data.from];
     if (peerConnection && data.candidate) {
@@ -815,48 +836,162 @@ export default function TeacherExamSession() {
     }
   };
 
-  // ==================== VIDEO MANAGEMENT ====================
-  const setupVideoElement = (socketId, stream) => {
-    const videoElement = videoRefs.current[socketId];
-    if (!videoElement || !stream) {
-      console.log('❌ Video element or stream not found for:', socketId);
-      return;
+// ==================== VIDEO MANAGEMENT ====================
+// PALITAN ang setupVideoElement function
+const setupVideoElement = (socketId, stream) => {
+  const videoElement = videoRefs.current[socketId];
+  if (!videoElement) {
+    console.log('❌ Video element not found for:', socketId);
+    return;
+  }
+
+  console.log('🎬 Setting up video for:', socketId, {
+    streamId: stream.id,
+    videoTracks: stream.getVideoTracks().length,
+    trackId: stream.getVideoTracks()[0]?.id,
+    readyState: stream.getVideoTracks()[0]?.readyState
+  });
+
+  try {
+    // CRITICAL: Clear previous event listeners
+    videoElement.onloadedmetadata = null;
+    videoElement.oncanplay = null;
+    videoElement.onplaying = null;
+    videoElement.onerror = null;
+    
+    // CRITICAL: Stop previous tracks properly
+    if (videoElement.srcObject) {
+      videoElement.srcObject.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch (e) {}
+      });
     }
-
-    console.log('🎬 Setting up video for:', socketId);
-
-    videoElement.style.transform = 'scaleX(-1)';
+    
+    // IMPORTANT: Clear srcObject first
     videoElement.srcObject = null;
-    videoElement.srcObject = stream;
-    videoElement.muted = true;
-    videoElement.playsInline = true;
     
-    const playWithRetry = async (attempt = 0) => {
-      try {
-        await videoElement.play();
-        console.log('✅ Video playing successfully on attempt:', attempt + 1);
-      } catch (error) {
-        console.log(`⚠️ Play attempt ${attempt + 1} failed:`, error.name);
-        if (attempt < 5) {
-          setTimeout(() => playWithRetry(attempt + 1), 300);
-        }
-      }
-    };
-    
-    playWithRetry();
-  };
-
-  const setVideoRef = (socketId, element) => {
-    if (element) {
-      videoRefs.current[socketId] = element;
+    // Add a small delay to ensure cleanup
+    setTimeout(() => {
+      // CRITICAL: Set the stream
+      videoElement.srcObject = stream;
+      videoElement.muted = true;
+      videoElement.playsInline = true;
+      videoElement.setAttribute('playsinline', '');
+      videoElement.setAttribute('webkit-playsinline', '');
       
-      const stream = studentStreams[socketId];
-      if (stream && element.srcObject !== stream) {
-        console.log('🎬 Setting existing stream for student:', socketId);
-        setupVideoElement(socketId, stream);
+      // CRITICAL: Force video dimensions
+      videoElement.style.width = '100%';
+      videoElement.style.height = '100%';
+      videoElement.style.objectFit = 'cover';
+      
+      console.log('✅ Stream set for:', socketId, {
+        srcObjectSet: !!videoElement.srcObject,
+        currentSrc: videoElement.currentSrc,
+        videoWidth: videoElement.videoWidth,
+        videoHeight: videoElement.videoHeight
+      });
+      
+      // CRITICAL: Add event listeners for debugging
+      videoElement.onloadedmetadata = () => {
+        console.log('📹 Metadata loaded for:', socketId, {
+          videoWidth: videoElement.videoWidth,
+          videoHeight: videoElement.videoHeight,
+          duration: videoElement.duration,
+          readyState: videoElement.readyState
+        });
+        
+        // Try to play after metadata loads
+        attemptPlayVideo(videoElement, socketId);
+      };
+      
+      videoElement.oncanplay = () => {
+        console.log('🎬 Video can play for:', socketId);
+        attemptPlayVideo(videoElement, socketId);
+      };
+      
+      videoElement.onplaying = () => {
+        console.log('✅ Video playing for:', socketId);
+      };
+      
+      videoElement.onerror = (e) => {
+        console.error('❌ Video error for:', socketId, e);
+      };
+      
+      // CRITICAL: If metadata is already loaded, try to play immediately
+      if (videoElement.readyState >= 1) {
+        attemptPlayVideo(videoElement, socketId);
       }
+      
+    }, 100);
+    
+  } catch (error) {
+    console.error('❌ Error in setupVideoElement:', error);
+  }
+};
+
+// DAGDAG: Helper function for play attempts
+const attemptPlayVideo = (videoElement, socketId) => {
+  if (!videoElement || videoElement.paused) {
+    const playPromise = videoElement.play();
+    
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          console.log('✅ Autoplay successful for:', socketId);
+        })
+        .catch(error => {
+          console.warn('⚠️ Autoplay blocked for:', socketId, error.name);
+          
+          // Show play button overlay
+          const container = videoElement.parentElement;
+          if (container) {
+            const overlay = document.createElement('div');
+            overlay.className = 'play-overlay';
+            overlay.innerHTML = `
+              <button class="play-manual-btn" onclick="this.parentElement.remove(); this.closest('video').play();">
+                ▶ Play Video
+              </button>
+            `;
+            overlay.style.cssText = `
+              position: absolute;
+              top: 0;
+              left: 0;
+              right: 0;
+              bottom: 0;
+              background: rgba(0,0,0,0.7);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              z-index: 10;
+            `;
+            container.style.position = 'relative';
+            container.appendChild(overlay);
+          }
+        });
     }
-  };
+  }
+};
+
+// ==================== VIDEO FALLBACK UI ====================
+const renderVideoFallback = (socketId, student) => {
+  const stream = studentStreams[socketId];
+  
+  if (!stream) {
+    return (
+      <div className="video-fallback">
+        <div className="fallback-icon">📹</div>
+        <div className="fallback-text">
+          <p>Waiting for camera...</p>
+          <small>Student: {getSafeStudentName(student)}</small>
+        </div>
+      </div>
+    );
+  }
+  
+  return null;
+};
+
 
   // ==================== STUDENT MANAGEMENT ====================
   const handleStudentJoined = (data) => {
@@ -980,6 +1115,7 @@ export default function TeacherExamSession() {
   };
 
   // ==================== CONNECTION CLEANUP ====================
+  
   const cleanupStudentConnection = (socketId) => {
     console.log('🧹 Cleaning up connection for:', socketId);
     
@@ -1032,6 +1168,34 @@ export default function TeacherExamSession() {
     activeConnections.current.clear();
   };
 
+
+
+  // ==================== VIDEO MONITORING ====================
+
+
+// ==================== AUTOMATIC CAMERA RETRY ====================
+useEffect(() => {
+  const interval = setInterval(() => {
+    students.forEach(student => {
+      if (student.isConnected && !studentStreams[student.socketId]) {
+        // Student is connected but no stream yet
+        const lastRequestTime = window.lastCameraRequest?.[student.socketId] || 0;
+        const timeSinceLastRequest = Date.now() - lastRequestTime;
+        
+        if (timeSinceLastRequest > 10000) { // Retry every 10 seconds
+          console.log('🔄 Retrying camera request for:', student.name);
+          requestStudentCamera(student.socketId);
+        }
+      }
+    });
+  }, 10000); // Check every 10 seconds
+  
+  return () => clearInterval(interval);
+}, [students, studentStreams]);
+
+
+
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     scrollToBottom();
@@ -1040,6 +1204,29 @@ export default function TeacherExamSession() {
   // ==================== RENDER FUNCTIONS ====================
   
   const connectedStudents = students.filter(student => student.socketId && student.isConnected);
+
+
+  // ==================== DEBUG MONITORING ====================
+useEffect(() => {
+  console.log('📊 Teacher Debug Info:', {
+    socketStatus,
+    connectedStudents: students.filter(s => s.isConnected).length,
+    totalStudents: students.length,
+    streamsCount: Object.keys(studentStreams).length,
+    connectionsCount: Object.keys(peerConnections).length,
+    activeConnections: activeConnections.current.size
+  });
+  
+  // Log each student's status
+  students.forEach(student => {
+    console.log(`👨‍🎓 ${student.name}:`, {
+      connected: student.isConnected,
+      cameraEnabled: student.cameraEnabled,
+      hasStream: !!studentStreams[student.socketId],
+      hasConnection: !!peerConnections[student.socketId]
+    });
+  });
+}, [students, studentStreams, peerConnections, socketStatus]);
 
   // PROCTORING CONTROLS POPUP
   const renderProctoringControlsPopup = () => {
@@ -1249,16 +1436,89 @@ export default function TeacherExamSession() {
                   
                 </div>
                 
-                <div className="video-container">
-                  <video 
-                    ref={(element) => setVideoRef(socketId, element)}
-                    autoPlay 
-                    muted
-                    playsInline
-                    className="student-video"
-                  />
-                </div>
-                
+      
+<div className="video-container">
+  <video 
+    ref={(element) => {
+      if (element) {
+        videoRefs.current[socketId] = element;
+        
+        // CRITICAL: Setup video if stream exists
+        if (stream && element.srcObject !== stream) {
+          console.log('🎬 Initial video setup for:', socketId);
+          
+          // Clear any existing content
+          element.srcObject = null;
+          
+          // Short delay before setting up
+          setTimeout(() => {
+            setupVideoElement(socketId, stream);
+          }, 50);
+        }
+      } else {
+        delete videoRefs.current[socketId];
+      }
+    }}
+    autoPlay 
+    muted
+    playsInline
+    className="student-video"
+    poster="/api/placeholder/400/300" // Optional: Add a placeholder
+    onError={(e) => {
+      console.error('❌ Video error event for:', socketId, {
+        error: e.target.error,
+        networkState: e.target.networkState,
+        readyState: e.target.readyState
+      });
+    }}
+    onStalled={(e) => {
+      console.warn('⚠️ Video stalled for:', socketId);
+    }}
+    onSuspend={(e) => {
+      console.log('⏸️ Video suspended for:', socketId);
+    }}
+  />
+  
+  {/* Video status indicator */}
+  <div className="video-status-overlay">
+    {stream ? (
+      <>
+        <span className="status-dot live"></span>
+        <span>LIVE</span>
+        <span className="track-info">
+          {stream.getVideoTracks().length} track(s)
+        </span>
+      </>
+    ) : (
+      <div className="status-offline">
+        <span className="status-dot offline"></span>
+        <span>WAITING FOR CAMERA</span>
+      </div>
+    )}
+  </div>
+  
+  {/* Fallback UI */}
+  {!stream && (
+    <div className="video-fallback-overlay">
+      <div className="fallback-content">
+        <div className="fallback-spinner"></div>
+        <p>Connecting to camera...</p>
+        <small>Student: {getSafeStudentName(student)}</small>
+        <button 
+          className="retry-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            console.log('🔄 Manual retry for:', socketId);
+            cleanupStudentConnection(socketId);
+            setTimeout(() => requestStudentCamera(socketId), 500);
+          }}
+        >
+          🔄 Retry Connection
+        </button>
+      </div>
+    </div>
+  )}
+</div>    
                 {/* ✅ VIDEO FOOTER WITH PROCTORING ALERTS */}
                 <div className="video-footer">
                   <div className="student-info-compact">
@@ -1381,6 +1641,25 @@ export default function TeacherExamSession() {
         </div>
         
         <div className="header-right">
+
+          <button 
+    className="refresh-cameras-btn"
+    onClick={() => {
+      console.log('🔄 Manually refreshing all camera connections...');
+      connectedStudents.forEach(student => {
+        if (student.isConnected) {
+          cleanupStudentConnection(student.socketId);
+          setTimeout(() => {
+            requestStudentCamera(student.socketId);
+          }, 500);
+        }
+      });
+    }}
+    title="Refresh all camera connections"
+  >
+    🔄 Refresh Cameras
+  </button>
+
           {/* TIMER SECTION */}
           <div className="timer-section">
             {timerSettings.hasTimer && timerSettings.isRunning ? (

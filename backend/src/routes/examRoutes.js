@@ -10,7 +10,7 @@ const auth = require("../middleware/authMiddleware");
 const pdfParse = require("pdf-parse");
 const mammoth = require("mammoth");
 const axios = require('axios');
-const User = require("../models/User");
+const User = require("../models/user");
 const StudentAttempts = require("../models/StudentAttempts");
 const StudentExamSession = require("../models/StudentExamSession"); // ✅ ADDED: Import StudentExamSession model
 

@@ -128,6 +128,67 @@ app.post('/api/proctoring-alert', async (req, res) => {
     res.status(500).json({ error: 'Failed to forward alert' });
   }
 });
+// Socket.io WebRTC handlers
+io.on('connection', (socket) => {
+  console.log(`✅ Socket connected: ${socket.id}`);
+  
+  // Handle camera request from teacher
+  socket.on('request-student-camera', (data) => {
+    console.log('📹 Teacher requesting camera from student:', data);
+    
+    // Forward request to student
+    io.to(data.studentSocketId).emit('camera-request', {
+      from: data.teacherSocketId,
+      roomId: data.roomId
+    });
+  });
+  
+  // Handle camera response from student
+  socket.on('camera-response', (data) => {
+    console.log('📹 Student camera response:', data);
+    
+    // Forward response to teacher
+    io.to(data.teacherSocketId).emit('camera-response', {
+      socketId: socket.id,
+      enabled: data.enabled,
+      error: data.error
+    });
+  });
+  
+  // Handle WebRTC offer from student
+  socket.on('webrtc-offer', (data) => {
+    console.log('🤝 Forwarding WebRTC offer from student to teacher');
+    
+    // Forward offer to teacher
+    io.to(data.target).emit('webrtc-offer', {
+      from: socket.id,
+      offer: data.offer
+    });
+  });
+  
+  // Handle WebRTC answer from teacher
+  socket.on('webrtc-answer', (data) => {
+    console.log('🤝 Forwarding WebRTC answer from teacher to student');
+    
+    // Forward answer to student
+    io.to(data.target).emit('webrtc-answer', {
+      from: data.target,
+      answer: data.answer
+    });
+  });
+  
+  // Handle ICE candidates
+  socket.on('ice-candidate', (data) => {
+    console.log('🧊 Forwarding ICE candidate');
+    
+    // Forward ICE candidate
+    io.to(data.target).emit('ice-candidate', {
+      from: socket.id,
+      candidate: data.candidate
+    });
+  });
+});
+
 
 // ===== HEALTH CHECK =====
 app.get("/api/health", (req, res) => {

@@ -431,16 +431,12 @@ const StudentCameraComponent = React.memo(({
   cameraRequested
 }) => {
   const videoRef = useRef(null);
-  useEffect(() => {
-  if (localStream && videoRef.current) {
-    videoRef.current.srcObject = localStream;
-    // IMPORTANTE: Try to play the video
-    videoRef.current.play().catch(error => {
-      console.log('Video play failed:', error);
-    });
-  }
-}, [localStream]);
 
+  useEffect(() => {
+    if (localStream && videoRef.current) {
+      videoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
 
   if (!cameraRequested && !localStream) return null;
 
@@ -2036,98 +2032,43 @@ useEffect(() => {
 
   // ==================== WEBRTC HANDLERS ====================
 // ==================== WEBRTC HANDLERS ====================
-const handleCameraRequest = async (data) => {
+const handleCameraRequest = async (data, isRetry = false) => {
   console.log('📹 Camera request received from teacher:', data);
   setCameraRequested(true);
   setTeacherSocketId(data.from);
   
+  // If we already have a stream, reuse it
+  if (localStream && localStream.active) {
+    console.log('✅ Using existing camera stream');
+    initiateWebRTC(data, localStream);
+    return;
+  }
+
   try {
     // Get camera stream
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 640, max: 1280 },
-        height: { ideal: 480, max: 720 },
-        frameRate: { ideal: 24, max: 30 },
+    console.log('🎥 Attempting to access camera...');
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { 
+        width: { ideal: 640, min: 320 },
+        height: { ideal: 480, min: 240 },
+        frameRate: { ideal: 24, min: 15 },
         facingMode: 'user'
-      },
-      audio: false
+      }, 
+      audio: false 
     });
     
-    console.log('✅ Camera stream obtained:', {
-      tracks: stream.getTracks().length,
-      videoTrack: stream.getVideoTracks()[0]?.label
-    });
-    
+    console.log('✅ Camera accessed successfully');
     setLocalStream(stream);
     setIsSharingCamera(true);
     setCameraActive(true);
-    
-    // Store globally
-    window.studentCameraStream = stream;
-    
-    // Create peer connection
-    const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ],
-      iceCandidatePoolSize: 10
-    });
-    
-    // Add all tracks
-    stream.getTracks().forEach(track => {
-      console.log('➕ Adding track to peer connection:', track.kind);
-      pc.addTrack(track, stream);
-    });
-    
-    // Handle ICE candidates
-    pc.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current) {
-        socketRef.current.emit('ice-candidate', {
-          target: data.from,
-          candidate: event.candidate
-        });
-      }
-    };
-    
-    pc.oniceconnectionstatechange = () => {
-      console.log('🧊 Student ICE state:', pc.iceConnectionState);
-    };
-    
-    pc.ontrack = (event) => {
-      console.log('📹 Student received track (should not happen)');
-    };
-    
-    // Create and send offer
-    const offer = await pc.createOffer({
-      offerToReceiveAudio: false,
-      offerToReceiveVideo: false
-    });
-    
-    await pc.setLocalDescription(offer);
-    
-    // Send offer to teacher
-    if (socketRef.current) {
-      socketRef.current.emit('webrtc-offer', {
-        target: data.from,
-        offer: offer
-      });
-      console.log('✅ WebRTC offer sent to teacher');
-    }
-    
-    // Send confirmation
-    socketRef.current.emit('camera-response', {
-      teacherSocketId: data.from,
-      enabled: true,
-      studentId: 'student-user'
-    });
-    
-    peerConnectionRef.current = pc;
-    setPeerConnection(pc);
+
+    // Start WebRTC connection
+    await initiateWebRTC(data, stream);
     
   } catch (error) {
-    console.error('❌ Camera request error:', error);
+    console.error('❌ Error accessing camera:', error);
     
+    // Send error response to teacher
     if (socketRef.current) {
       socketRef.current.emit('camera-response', {
         teacherSocketId: data.from,
@@ -2138,16 +2079,97 @@ const handleCameraRequest = async (data) => {
     
     setIsSharingCamera(false);
     setCameraActive(false);
-    
-    if (error.name === 'NotAllowedError') {
-      alert('❌ Camera permission denied. Please allow camera access.');
-    } else if (error.name === 'NotFoundError') {
-      alert('❌ No camera found. Please connect a camera.');
-    } else {
-      alert('❌ Failed to access camera: ' + error.message);
-    }
+    alert('❌ Failed to access camera. Please check permissions.');
   }
 };
+
+// Separate function for WebRTC initiation
+const initiateWebRTC = async (data, stream) => {
+  try {
+    // Clean up existing connection
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+    }
+
+    // Create new peer connection
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    });
+
+    peerConnectionRef.current = pc;
+
+    // Add tracks to connection
+    stream.getTracks().forEach(track => {
+      console.log('➕ Adding track to peer connection:', track.kind);
+      pc.addTrack(track, stream);
+    });
+
+    // Handle ICE candidates
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socketRef.current) {
+        console.log('🧊 Sending ICE candidate to teacher');
+        socketRef.current.emit('ice-candidate', {
+          target: data.from,
+          candidate: event.candidate
+        });
+      }
+    };
+
+    // Handle connection state changes
+    pc.onconnectionstatechange = () => {
+      console.log('🔗 Student WebRTC state:', pc.connectionState);
+    };
+
+    // Create and send offer
+    console.log('🤝 Creating WebRTC offer...');
+    const offer = await pc.createOffer({
+      offerToReceiveAudio: false,
+      offerToReceiveVideo: false
+    });
+    
+    await pc.setLocalDescription(offer);
+    console.log('✅ Created local offer');
+
+    // Send offer to teacher
+    if (socketRef.current) {
+      socketRef.current.emit('webrtc-offer', {
+        target: data.from,
+        offer: offer
+      });
+      console.log('✅ Sent WebRTC offer to teacher');
+    }
+
+    // Send camera response
+    socketRef.current.emit('camera-response', {
+      teacherSocketId: data.from,
+      enabled: true,
+      studentId: 'student-user'
+    });
+
+    setPeerConnection(pc);
+
+  } catch (error) {
+    console.error('❌ Error in WebRTC initiation:', error);
+    
+    // Send error response
+    if (socketRef.current) {
+      socketRef.current.emit('camera-response', {
+        teacherSocketId: data.from,
+        enabled: false,
+        error: error.message
+      });
+    }
+    
+    setIsSharingCamera(false);
+    setCameraActive(false);
+    throw error; // Re-throw the error
+  }
+};
+      
+  
 
   const handleWebRTCAnswer = async (data) => {
     const pc = peerConnectionRef.current;

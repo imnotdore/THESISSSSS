@@ -261,13 +261,13 @@
   right: 20px;
   width: 280px;
   z-index: 1000;
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(250, 248, 248, 0.95);
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   border: 1px solid #e1e5e9;
   backdrop-filter: blur(10px);
   overflow: hidden;
-  max-height: 120px;
+  max-height: 100px;
 }
 
 .camera-section {
@@ -954,6 +954,8 @@
   object-fit: cover !important;
   display: block !important;
   background: #000 !important;
+  /* ADD THIS TO FIX MIRROR EFFECT */
+  transform: scaleX(-1); /* Flips the video horizontally */
 }
 
 .camera-offline {
@@ -3444,4 +3446,132 @@
   font-size: 12px;
   color: #666;
   margin-top: 10px;
+}
+
+
+/* Student Camera Component Styles */
+.student-camera-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 280px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border: 2px solid #4285f4;
+  overflow: hidden;
+  z-index: 999;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(100px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.camera-header {
+  background: #4285f4;
+  color: white;
+  padding: 10px 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.camera-header h4 {
+  margin: 0;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.camera-status {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.camera-status.active {
+  background: #34a853;
+  color: white;
+}
+
+.camera-status.inactive {
+  background: #ea4335;
+  color: white;
+}
+
+.camera-preview {
+  width: 100%;
+  height: 180px;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+}
+
+.camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.camera-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  background: #333;
+}
+
+.camera-icon {
+  font-size: 40px;
+  margin-bottom: 10px;
+  opacity: 0.7;
+}
+
+.camera-placeholder p {
+  margin: 5px 0;
+  font-size: 14px;
+  text-align: center;
+}
+
+.camera-info {
+  padding: 10px 15px;
+  background: #f8f9fa;
+  border-top: 1px solid #eee;
+  font-size: 12px;
+  color: #666;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sharing-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #4285f4;
+  font-weight: 500;
+}
+
+
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
