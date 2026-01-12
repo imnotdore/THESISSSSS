@@ -1,18 +1,20 @@
 // src/pages/AdminDashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart, Pie, Cell, LineChart, Line, ResponsiveContainer 
 } from 'recharts';
+import { Link, useNavigate } from 'react-router-dom';
 import "./AdminDashboard.css";
 import { getAdminStats } from "../lib/adminApi";
 import StatCard from "./admin/StatCard";
+
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState('week');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchStats();
@@ -30,6 +32,29 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleViewAll = (route) => {
+    navigate(route);
+  };
+
+  const handleQuickAction = (action) => {
+    switch(action) {
+      case 'add-user':
+        navigate('/admin/users');
+        break;
+      case 'generate-report':
+        navigate('/admin/reports');
+        break;
+      case 'send-announcement':
+        // Implement send announcement logic
+        break;
+      case 'system-settings':
+        navigate('/admin/settings');
+        break;
+      default:
+        break;
+    }
+  };
+
   if (loading) {
     return (
       <div className="dashboard-loading">
@@ -42,89 +67,12 @@ const AdminDashboard = () => {
   const userData = stats?.users?.growth || [];
   const examData = stats?.exams?.distribution || [];
   const classData = stats?.classes?.status || [];
+  const recentActivities = stats?.recentActivities || [];
 
-  const COLORS = ['#667eea', '#00C49F', '#FF9800', '#FF8042'];
+  const COLORS = ['#667eea', '#00C49F', '#FF9800', '#FF8042', '#8884d8', '#82ca9d'];
 
   return (
-    <div className={`admin-dashboard-container ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-      {/* Sidebar */}
-      <div className="admin-sidebar">
-        <div className="sidebar-header">
-          <div className="sidebar-brand">
-            <span className="brand-icon">📊</span>
-            {!sidebarCollapsed && <span className="brand-text">EduAdmin</span>}
-          </div>
-          <button 
-            className="sidebar-toggle"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          >
-            {sidebarCollapsed ? '→' : '←'}
-          </button>
-        </div>
-        
-        <div className="sidebar-menu">
-          <div className="menu-section">
-            {!sidebarCollapsed && <span className="section-label">MAIN</span>}
-            <a href="#" className="menu-item active">
-              <span className="menu-icon">🏠</span>
-              {!sidebarCollapsed && <span>Dashboard</span>}
-            </a>
-            <a href="#" className="menu-item">
-              <span className="menu-icon">👥</span>
-              {!sidebarCollapsed && <span>Users</span>}
-            </a>
-            <a href="#" className="menu-item">
-              <span className="menu-icon">🏫</span>
-              {!sidebarCollapsed && <span>Classes</span>}
-            </a>
-            <a href="#" className="menu-item">
-              <span className="menu-icon">📝</span>
-              {!sidebarCollapsed && <span>Exams</span>}
-            </a>
-          </div>
-          
-          <div className="menu-section">
-            {!sidebarCollapsed && <span className="section-label">ANALYTICS</span>}
-            <a href="#" className="menu-item">
-              <span className="menu-icon">📈</span>
-              {!sidebarCollapsed && <span>Reports</span>}
-            </a>
-            <a href="#" className="menu-item">
-              <span className="menu-icon">📊</span>
-              {!sidebarCollapsed && <span>Analytics</span>}
-            </a>
-            <a href="#" className="menu-item">
-              <span className="menu-icon">📋</span>
-              {!sidebarCollapsed && <span>Logs</span>}
-            </a>
-          </div>
-          
-          <div className="menu-section">
-            {!sidebarCollapsed && <span className="section-label">SETTINGS</span>}
-            <a href="#" className="menu-item">
-              <span className="menu-icon">⚙️</span>
-              {!sidebarCollapsed && <span>Settings</span>}
-            </a>
-            <a href="#" className="menu-item">
-              <span className="menu-icon">👤</span>
-              {!sidebarCollapsed && <span>Profile</span>}
-            </a>
-          </div>
-        </div>
-        
-        <div className="sidebar-footer">
-          <div className="user-profile">
-            <div className="user-avatar">AD</div>
-            {!sidebarCollapsed && (
-              <div className="user-info">
-                <span className="user-name">Admin User</span>
-                <span className="user-role">Super Admin</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
+    <div className="admin-dashboard">
       {/* Main Content */}
       <main className="admin-main-content">
         {/* Top Header */}
@@ -147,49 +95,71 @@ const AdminDashboard = () => {
               </select>
             </div>
             <button className="btn-primary" onClick={fetchStats}>
+              <span className="refresh-icon">↻</span>
               Refresh Data
             </button>
           </div>
         </div>
 
-        {/* Stats Cards */}
+        {/* Stats Cards - Make them clickable */}
+        
         <div className="stats-grid">
-          <StatCard
-            title="Total Users"
-            value={stats?.users?.total || 0}
-            change={stats?.users?.growthPercentage || 0}
-            icon="👥"
-            color="#2196F3"
-          />
-          <StatCard
-            title="Active Classes"
-            value={stats?.classes?.active || 0}
-            change={stats?.classes?.growthPercentage || 0}
-            icon="🏫"
-            color="#4CAF50"
-          />
-          <StatCard
-            title="Ongoing Exams"
-            value={stats?.exams?.active || 0}
-            change={stats?.exams?.growthPercentage || 0}
-            icon="📝"
-            color="#FF9800"
-          />
-          <StatCard
-            title="System Status"
-            value={stats?.system?.status || 'Good'}
-            change={0}
-            icon="🛡️"
-            color="#9C27B0"
-            isStatus={true}
-          />
+        <Link to="/admin/users" className="stat-card-link">
+  <StatCard
+    title="Total Users"
+    value={stats?.totalUsers || 0}
+    change={stats?.userGrowthPercentage || 0}
+    icon="👥"
+    color="#2196F3"
+    isLoading={loading}
+  />
+</Link>
+          
+          <Link to="/admin/classes" className="stat-card-link">
+            <StatCard
+              title="Active Classes"
+              value={stats?.classes?.active || 0}
+              change={stats?.classes?.growthPercentage || 0}
+              icon="🏫"
+              color="#4CAF50"
+              isLoading={loading}
+            />
+          </Link>
+          
+          <Link to="/admin/exams" className="stat-card-link">
+            <StatCard
+              title="Ongoing Exams"
+              value={stats?.exams?.active || 0}
+              change={stats?.exams?.growthPercentage || 0}
+              icon="📝"
+              color="#FF9800"
+              isLoading={loading}
+            />
+          </Link>
+          
+          <Link to="/admin/system" className="stat-card-link">
+            <StatCard
+              title="System Status"
+              value={stats?.system?.status || 'Good'}
+              change={stats?.system?.uptime || 99.9}
+              icon="🛡️"
+              color="#9C27B0"
+              isStatus={true}
+              isLoading={loading}
+            />
+          </Link>
         </div>
 
         {/* Charts Section */}
         <div className="charts-section">
           <div className="section-header">
             <h2>Analytics & Insights</h2>
-            <button className="text-link">View detailed reports →</button>
+            <button 
+              className="text-link" 
+              onClick={() => handleViewAll('/admin/reports')}
+            >
+              View detailed reports →
+            </button>
           </div>
           
           <div className="charts-grid">
@@ -231,23 +201,39 @@ const AdminDashboard = () => {
                       borderRadius: '8px',
                       boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                     }}
+                    formatter={(value, name) => [
+                      `${value} ${name}`,
+                      name === 'students' ? 'Students' : 'Teachers'
+                    ]}
                   />
                   <Line 
                     type="monotone" 
                     dataKey="students" 
+                    name="students"
                     stroke="#667eea" 
                     strokeWidth={2}
-                    dot={false}
+                    dot={{ r: 4 }}
+                    activeDot={{ r: 6 }}
                   />
                   <Line 
                     type="monotone" 
                     dataKey="teachers" 
+                    name="teachers"
                     stroke="#00C49F" 
                     strokeWidth={2}
-                    dot={false}
+                    dot={{ r: 4 }}
+                    activeDot={{ r: 6 }}
                   />
                 </LineChart>
               </ResponsiveContainer>
+              <div className="chart-footer">
+                <button 
+                  className="view-chart-btn"
+                  onClick={() => handleViewAll('/admin/users')}
+                >
+                  View User Analytics
+                </button>
+              </div>
             </div>
 
             {/* Exam Distribution Chart */}
@@ -266,6 +252,7 @@ const AdminDashboard = () => {
                     outerRadius={80}
                     paddingAngle={2}
                     dataKey="value"
+                    label={(entry) => `${entry.name}: ${entry.value}`}
                     stroke="#fff"
                     strokeWidth={1}
                   >
@@ -277,7 +264,10 @@ const AdminDashboard = () => {
                     ))}
                   </Pie>
                   <Tooltip 
-                    formatter={(value) => [`${value} exams`, 'Count']}
+                    formatter={(value, name, props) => [
+                      `${value} exams`,
+                      props.payload.name
+                    ]}
                     contentStyle={{
                       fontSize: '12px',
                       border: 'none',
@@ -285,8 +275,17 @@ const AdminDashboard = () => {
                       boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                     }}
                   />
+                  <Legend />
                 </PieChart>
               </ResponsiveContainer>
+              <div className="chart-footer">
+                <button 
+                  className="view-chart-btn"
+                  onClick={() => handleViewAll('/admin/exams')}
+                >
+                  View Exam Analytics
+                </button>
+              </div>
             </div>
 
             {/* Class Status Chart */}
@@ -312,6 +311,7 @@ const AdminDashboard = () => {
                     tickLine={false}
                   />
                   <Tooltip 
+                    formatter={(value) => [`${value} classes`, 'Count']}
                     contentStyle={{
                       fontSize: '12px',
                       border: 'none',
@@ -327,21 +327,35 @@ const AdminDashboard = () => {
                   />
                 </BarChart>
               </ResponsiveContainer>
+              <div className="chart-footer">
+                <button 
+                  className="view-chart-btn"
+                  onClick={() => handleViewAll('/admin/classes')}
+                >
+                  View Class Analytics
+                </button>
+              </div>
             </div>
 
             {/* Recent Activities */}
             <div className="chart-card">
               <div className="chart-header">
                 <h3>Recent Activities</h3>
-                <button className="text-link">View all →</button>
+                <button 
+                  className="text-link" 
+                  onClick={() => handleViewAll('/admin/audit-logs')}
+                >
+                  View all →
+                </button>
               </div>
               <div className="activity-list">
-                {stats?.recentActivities?.slice(0, 6).map((activity, index) => (
+                {recentActivities.slice(0, 6).map((activity, index) => (
                   <div key={index} className="activity-item">
                     <div className="activity-icon">
-                      {activity.type === 'login' ? '→' : 
-                       activity.type === 'create' ? '+' : 
-                       activity.type === 'update' ? '↻' : '×'}
+                      {activity.type === 'login' ? '🔐' : 
+                       activity.type === 'create' ? '➕' : 
+                       activity.type === 'update' ? '🔄' : 
+                       activity.type === 'delete' ? '🗑️' : '📝'}
                     </div>
                     <div className="activity-content">
                       <div className="activity-text">{activity.description}</div>
@@ -365,28 +379,40 @@ const AdminDashboard = () => {
                 <h2>Quick Actions</h2>
               </div>
               <div className="quick-actions-grid">
-                <button className="quick-action-btn">
+                <button 
+                  className="quick-action-btn"
+                  onClick={() => handleQuickAction('add-user')}
+                >
                   <span className="action-icon">+</span>
                   <div className="action-content">
                     <span className="action-title">Add User</span>
                     <span className="action-desc">Create new user account</span>
                   </div>
                 </button>
-                <button className="quick-action-btn">
+                <button 
+                  className="quick-action-btn"
+                  onClick={() => handleQuickAction('generate-report')}
+                >
                   <span className="action-icon">📊</span>
                   <div className="action-content">
                     <span className="action-title">Generate Report</span>
                     <span className="action-desc">Export analytics data</span>
                   </div>
                 </button>
-                <button className="quick-action-btn">
+                <button 
+                  className="quick-action-btn"
+                  onClick={() => handleQuickAction('send-announcement')}
+                >
                   <span className="action-icon">📧</span>
                   <div className="action-content">
                     <span className="action-title">Send Announcement</span>
                     <span className="action-desc">Broadcast message</span>
                   </div>
                 </button>
-                <button className="quick-action-btn">
+                <button 
+                  className="quick-action-btn"
+                  onClick={() => handleQuickAction('system-settings')}
+                >
                   <span className="action-icon">⚙️</span>
                   <div className="action-content">
                     <span className="action-title">System Settings</span>
@@ -399,37 +425,47 @@ const AdminDashboard = () => {
             <div className="system-status-card">
               <div className="section-header">
                 <h2>System Status</h2>
-                <span className="status-badge good">All Systems Operational</span>
+                <span className={`status-badge ${stats?.system?.status === 'Good' ? 'good' : 'warning'}`}>
+                  {stats?.system?.status === 'Good' ? 'All Systems Operational' : 'System Issues Detected'}
+                </span>
               </div>
               <div className="system-status-list">
                 <div className="status-item">
                   <div className="status-info">
                     <span className="status-name">Web Server</span>
-                    <span className="status-value">120ms response</span>
+                    <span className="status-value">{stats?.system?.webServer || '120ms response'}</span>
                   </div>
                   <span className="status-indicator good"></span>
                 </div>
                 <div className="status-item">
                   <div className="status-info">
                     <span className="status-name">Database</span>
-                    <span className="status-value">45 queries/sec</span>
+                    <span className="status-value">{stats?.system?.database || '45 queries/sec'}</span>
                   </div>
                   <span className="status-indicator good"></span>
                 </div>
                 <div className="status-item">
                   <div className="status-info">
                     <span className="status-name">Storage</span>
-                    <span className="status-value">85% used</span>
+                    <span className="status-value">{stats?.system?.storage || '85% used'}</span>
                   </div>
                   <span className="status-indicator warning"></span>
                 </div>
                 <div className="status-item">
                   <div className="status-info">
                     <span className="status-name">API Service</span>
-                    <span className="status-value">99.9% uptime</span>
+                    <span className="status-value">{stats?.system?.uptime || '99.9% uptime'}</span>
                   </div>
                   <span className="status-indicator good"></span>
                 </div>
+              </div>
+              <div className="status-footer">
+                <button 
+                  className="view-system-btn"
+                  onClick={() => handleViewAll('/admin/system')}
+                >
+                  View System Details
+                </button>
               </div>
             </div>
           </div>

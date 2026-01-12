@@ -40,16 +40,69 @@ const AdminUsers = () => {
     }
   };
 
-  const handleViewDetails = async (userId) => {
-    try {
-      const user = await getUserDetails(userId);
-      setSelectedUser(user);
-      setModalOpen(true);
-    } catch (error) {
-      console.error('Failed to fetch user details:', error);
+ // Add this function in AdminUsers component
+const verifyAdminAuth = async () => {
+  try {
+    const token = localStorage.getItem('adminToken');
+    if (!token) {
+      console.log('❌ No admin token found');
+      return false;
     }
-  };
+    
+    // Try to get admin profile to verify token
+    const { getAdminProfile } = await import('../lib/adminApi');
+    await getAdminProfile();
+    console.log('✅ Admin token is valid');
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Admin token invalid:', error.response?.data);
+    return false;
+  }
+};
 
+const handleViewDetails = async (userId) => {
+  console.log('🔄 View button clicked for user:', userId);
+  
+  // Verify auth first
+  const isAuthenticated = await verifyAdminAuth();
+  
+  if (!isAuthenticated) {
+    alert('Please login as admin first!');
+    navigate('/admin/login');
+    return;
+  }
+  
+  try {
+    console.log('📞 Fetching user details...');
+    
+    // Option 1: Try API call
+    const user = await getUserDetails(userId);
+    console.log('✅ API response:', user);
+    
+    setSelectedUser(user);
+    setModalOpen(true);
+    
+  } catch (error) {
+    console.error('❌ API failed:', error.message);
+    
+    // Option 2: Fallback to local data
+    const localUser = users.find(u => u._id === userId);
+    
+    if (localUser) {
+      console.log('🔄 Using local user data');
+      setSelectedUser({
+        ...localUser,
+        isVerified: localUser.isVerified || true,
+        phone: localUser.phone || 'Not provided',
+        address: localUser.address || 'Not provided'
+      });
+      setModalOpen(true);
+    } else {
+      alert('Cannot load user details. Please try again.');
+    }
+  }
+};
   const handleUpdateUser = async (userId, updates) => {
     try {
       await updateUser(userId, updates);
@@ -61,20 +114,64 @@ const AdminUsers = () => {
       console.error('Failed to update user:', error);
     }
   };
-
-  const handleDeleteUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to delete this user?')) return;
-    
-    try {
-      await deleteUser(userId);
-      fetchUsers();
-      if (selectedUser?._id === userId) {
-        setModalOpen(false);
-      }
-    } catch (error) {
-      console.error('Failed to delete user:', error);
+const handleDeleteUser = async (userId, event) => {
+  console.log('🔐 Checking authentication before delete...');
+  
+  // 1. Check if token exists
+  const token = localStorage.getItem('adminToken');
+  console.log('Token exists:', !!token);
+  console.log('Token:', token ? `${token.substring(0, 20)}...` : 'NO TOKEN');
+  
+  if (!token) {
+    alert('❌ Please login as admin first!');
+    navigate('/admin/login');
+    return;
+  }
+  
+  // 2. Try to verify token first
+  try {
+    const { getAdminProfile } = await import('../lib/adminApi');
+    await getAdminProfile();
+    console.log('✅ Admin token verified');
+  } catch (authError) {
+    console.error('❌ Token verification failed:', authError.message);
+    alert('Session expired! Please login again.');
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('admin');
+    navigate('/admin/login');
+    return;
+  }
+  
+  // 3. Proceed with delete
+  const user = users.find(u => u._id === userId);
+  if (!window.confirm(`Delete "${user?.name}"?`)) return;
+  
+  try {
+    // Show loading
+    if (event?.target) {
+      event.target.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+      event.target.disabled = true;
     }
-  };
+    
+    console.log('📞 Calling delete API...');
+    const response = await deleteUser(userId);
+    console.log('✅ Delete response:', response);
+    
+    // Remove from UI
+    setUsers(prev => prev.filter(u => u._id !== userId));
+    alert(`✅ User "${user?.name}" deleted!`);
+    
+  } catch (error) {
+    console.error('❌ Delete failed:', error.message);
+    alert(`Delete failed: ${error.response?.data?.message || error.message}`);
+  } finally {
+    // Reset button
+    if (event?.target) {
+      event.target.innerHTML = 'Delete';
+      event.target.disabled = false;
+    }
+  }
+};
 
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value, page: 1 }));
@@ -102,6 +199,29 @@ const AdminUsers = () => {
     };
     return badges[role] || 'secondary';
   };
+const showToast = (message, type = 'success') => {
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <div class="toast-content">
+      <strong>${type === 'success' ? '✅' : '❌'} ${type === 'success' ? 'Success' : 'Error'}</strong>
+      <p>${message}</p>
+    </div>
+  `;
+  
+  document.body.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.classList.add('show');
+  }, 10);
+  
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      document.body.removeChild(toast);
+    }, 300);
+  }, 3000);
+};
 
   return (
     <div className="admin-users">
@@ -235,18 +355,14 @@ const AdminUsers = () => {
                           >
                             View
                           </button>
-                          <button
-                            className="btn btn-sm btn-outline-secondary"
-                            onClick={() => navigate(`/admin/users/${user._id}/edit`)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn-sm btn-outline-danger"
-                            onClick={() => handleDeleteUser(user._id)}
-                          >
-                            Delete
-                          </button>
+                         
+                         <button
+  className="btn btn-sm btn-outline-danger"
+  onClick={(e) => handleDeleteUser(user._id, e)}
+  title="Delete this user"
+>
+  Delete
+</button>
                         </div>
                       </td>
                     </tr>

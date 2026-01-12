@@ -74,8 +74,11 @@ export const adminLogout = async () => {
 };
 
 // ===== ADMIN DASHBOARD FUNCTIONS =====
+// ===== ADMIN DASHBOARD FUNCTIONS =====
 export const getAdminStats = async (timeRange = "week") => {
-  const response = await adminApi.get("/dashboard/stats", { params: { timeRange } });
+  const response = await adminApi.get("/dashboard/stats", { 
+    params: { timeRange } 
+  });
   return response;
 };
 
